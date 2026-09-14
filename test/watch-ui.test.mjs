@@ -1,0 +1,23 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+const html = fs.readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+test('watch renderer filters selected chain, caps rows, escapes data and preserves unknowns', () => {
+  const start = html.indexOf('function renderWatchPool(data)');
+  const end = html.indexOf('function renderManagement(data)', start);
+  assert.ok(start > 0 && end > start);
+  const nodes = { watchRows: {}, watchSummary: {} };
+  const context = { byId: id => nodes[id], viewChain: 'robinhood', activeChain: () => 'base', escapeHtml: value => String(value).replaceAll('<', '&lt;').replaceAll('"', '&quot;'), formatClock: value => String(value), formatCount: value => value == null ? '--' : String(value), formatMoney: value => value == null ? '--' : String(value) };
+  vm.runInNewContext(html.slice(start, end) + ';this.renderWatchPool = renderWatchPool', context);
+  context.renderWatchPool({ watchPool: [...Array.from({ length: 105 }, () => ({ chain: 'robinhood', address: '<img>', label: '<script>', history: [{ at: 1, reasons: ['<script>'] }], latest: { status: 'X_REVIEW', price: null }, riskLatched: true })), { chain: 'base', address: 'OTHER_CHAIN' }] });
+  assert.equal((nodes.watchRows.innerHTML.match(/data-watch-pause=/g) || []).length, 100);
+  assert.match(nodes.watchSummary.textContent, /105/);
+  assert.match(nodes.watchRows.innerHTML, /&lt;script>/);
+  assert.doesNotMatch(nodes.watchRows.innerHTML, /<script>|OTHER_CHAIN/);
+  assert.match(nodes.watchRows.innerHTML, /--/);
+  assert.match(nodes.watchRows.innerHTML, /风险隔离/);
+  assert.match(html, /用户标注，未核验/);
+  assert.match(html, /id="watchLabel"[^>]*maxlength="80"/);
+  assert.match(html, /postLocal\('\/api\/watch-pool'/);
+});

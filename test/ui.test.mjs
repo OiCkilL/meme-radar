@@ -22,7 +22,7 @@ test('所有显式像素字号均不小于14像素', () => {
 
 test('看板明确区分累计、本轮和近30分钟口径', () => {
   assert.match(html, /<h1[^>]*>Meme雷达开源版<\/h1>/);
-  assert.match(html, /class="mark">雷达<\/div>/);
+  assert.match(html, /class="mark"[^>]*>[\s\S]*?<svg/);
   assert.match(html, /扫描轮次[\s\S]*累计/);
   assert.match(html, /发现代币[\s\S]*本轮/);
   assert.match(html, /深度审计[\s\S]*近30分钟/);
@@ -74,7 +74,7 @@ test('六语切换持久化并支持阿拉伯语RTL', () => {
 });
 
 test('语言下拉使用地球图标和深色高对比选项', () => {
-  assert.match(html, /class="language-icon" aria-hidden="true">🌐<\/span>/);
+  assert.match(html, /class="language-icon" aria-hidden="true">[\s\S]*?<svg/);
   assert.match(html, /class="visually-hidden" data-i18n="languageLabel">语言<\/span>/);
   assert.match(html, /\.language-select\s*\{[\s\S]*?color-scheme:\s*dark/);
   assert.match(html, /\.language-select option\s*\{[\s\S]*?background:\s*#0b151a;[\s\S]*?color:\s*#f2faf8/);
@@ -162,3 +162,43 @@ test('候选表明确展示GoPlus与DexScreener交叉验证', () => {
   assert.match(html, /Dex复核/);
   assert.match(html, /多源数据冲突/);
 });
+
+test('支持深色浅色与系统三态主题且首屏粒子图层不挤占内容流', () => {
+  assert.match(html, /id="themeSelect"/);
+  assert.match(html, /id="themeIcon"/);
+  assert.match(html, /data-i18n="themeLabel"/);
+  assert.match(html, /html\[data-theme="light"\]/);
+  assert.match(html, /data-theme['"]\s*,\s*['"]dark['"]/);
+  assert.match(html, /@media\s*\(prefers-color-scheme:\s*light\)/);
+  assert.match(html, /\.particle-canvas\s*\{[\s\S]*?position:\s*fixed;/);
+  assert.match(html, /\.shell\s*\{[\s\S]*?position:\s*relative;[\s\S]*?z-index:\s*1;/);
+});
+
+test('扫描链路下拉所在顶栏叠层高于深度审计指标和粘性表头', () => {
+  const headerBlock = html.match(/\n    header \{\n([\s\S]*?)\n    \}/);
+  assert.ok(headerBlock, '应能提取顶栏 header 样式');
+  assert.match(headerBlock[1], /position:\s*relative;/);
+  assert.match(headerBlock[1], /overflow:\s*visible;/);
+  const headerZ = Number(headerBlock[1].match(/z-index:\s*(\d+)/)?.[1]);
+  assert.ok(Number.isFinite(headerZ) && headerZ >= 20, '顶栏须建立高于后续内容的层叠上下文，避免 backdrop-filter 把下拉关在内部');
+
+  const menuZ = Number(html.match(/\.chain-dropdown-menu \{\n[\s\S]*?z-index:\s*(\d+)/)?.[1]);
+  const thZ = Number(html.match(/\n    th \{\n[\s\S]*?z-index:\s*(\d+)/)?.[1]);
+  const stickyCornerZ = Number(html.match(/th:first-child \{ z-index:\s*(\d+)/)?.[1]);
+  const toastZ = Number(html.match(/\.toast \{\n[\s\S]*?z-index:\s*(\d+)/)?.[1]);
+  assert.equal(thZ, 4);
+  assert.equal(stickyCornerZ, 5);
+  assert.ok(menuZ >= 100, '扫描链路菜单本身仍需高于顶栏内部控件');
+  assert.ok(headerZ > stickyCornerZ, '顶栏整体须压过机器人/同源钱包等粘性表头');
+  assert.ok(toastZ > headerZ, 'toast 仍须浮在顶栏之上');
+});
+
+test('多链切换与扫描选择渲染官方Web3Icons矢量图标', () => {
+  assert.match(html, /const chainIcons =/);
+  assert.match(html, /function chainIcon\(id\)/);
+  for (const chain of ['sol', 'bsc', 'base', 'eth', 'robinhood', 'arc', 'stable']) {
+    assert.match(html, new RegExp('chain-icon-' + chain));
+  }
+  assert.match(html, /chainIcon\(chain\.id\)/);
+});
+
