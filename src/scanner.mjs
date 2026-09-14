@@ -338,11 +338,12 @@ function addEvent(events, type, message, chain, data = {}) {
 }
 
 export class Scanner {
-  constructor({ gmgn, secondary = null, state, controls = null, settings = config }) {
+  constructor({ gmgn, secondary = null, state, controls = null, watchPool = null, settings = config }) {
     this.gmgn = gmgn;
     this.secondary = secondary;
     this.state = state;
     this.controls = controls;
+    this.watchPool = watchPool;
     this.config = settings;
     this.supportedChains = [...settings.supportedChains];
     this.activeChain = this.supportedChains.includes(state.value.activeChain) ? state.value.activeChain : settings.chain;
@@ -462,7 +463,15 @@ export class Scanner {
         return;
       }
 
-      let discovered = await this.gmgn.discover(chain);
+      let discovered, discoveryError = null;
+      try { discovered = await this.gmgn.discover(chain); }
+      catch (error) {
+        if (['GMGN_RATE_LIMITED', 'GMGN_AUTH_FAILED', 'GMGN_PERMISSION_DENIED'].includes(error?.code)
+          || !this.watchPool?.due(chain, startedAt, 1).length) throw error;
+        // 榜单故障不取消已保存地址的复查；全局限流和认证错误仍必须停止。
+        discovered = [];
+        discoveryError = error;
+      }
       if (this.gmgn.keyEpoch !== keyEpoch) return;
       const reviewRequests = [...this.requestedReviews.values()].filter(item => item.chain === chain
         && item.epoch === keyEpoch && Date.now() - item.at <= 10 * 60000);
@@ -470,6 +479,7 @@ export class Scanner {
       discovered = [...new Map([...reviewRequests.map(item => item.row), ...discovered].map(row => [addressKey(row.address), row])).values()];
       const discoveredByAddress = new Map(discovered.filter(row => row?.address).map(row => [addressKey(row.address), row]));
       const screened = discovered.map(row => ({ row, screen: discoveryScreen(row, settings) }));
+      this.watchPool?.capture(chain, screened, startedAt);
       const prequalified = screened.filter(item => item.screen.pass).sort((a, b) =>
         Number(b.screen.priorityBand) - Number(a.screen.priorityBand) || b.screen.score - a.screen.score
       );
@@ -482,10 +492,20 @@ export class Scanner {
         .map(row => ({ row: { address: row.address, symbol: row.symbol || row.address.slice(0, 6), name: row.name || '',
           price: row.price, market_cap: row.marketCap, liquidity: row.liquidity, creation_timestamp: row.createdAt, _monitorOnly: true },
           screen: { mc: num(row.marketCap), liquidity: num(row.liquidity), ageSec: num(row.ageSec), priorityBand: true, score: 0 } }));
-      const auditable = [...prequalified, ...monitors];
+      const watchDue = this.watchPool?.due(chain, startedAt, 1) || [];
+      const watchOnly = watchDue.filter(row => !prequalified.some(item => addressKey(item.row.address) === addressKey(row.address)))
+        .map(row => ({ row: { address: row.address, symbol: row.symbol || '?', _monitorOnly: true },
+          screen: { mc: 0, liquidity: 0, ageSec: 0, priorityBand: false, score: 0 } }));
+      const pausedWatch = new Set((this.watchPool?.snapshot(chain) || []).filter(row => row.paused).map(row => addressKey(row.address)));
+      const auditable = [...prequalified, ...monitors.filter(item => !watchOnly.some(row => addressKey(row.row.address) === addressKey(item.row.address))), ...watchOnly]
+        .filter(item => !pausedWatch.has(addressKey(item.row.address)));
       let auditQueue = buildQueue(prior.auditQueue, auditable, startedAt, settings);
       const availableAddresses = new Set(auditable.map(item => addressKey(item.row.address)));
       const queueByAddress = new Map(auditQueue.map(item => [addressKey(item.address), item]));
+      for (const row of watchDue) {
+        const queued = queueByAddress.get(addressKey(row.address));
+        if (queued) queued.nextAuditAt = row.nextCheckAt;
+      }
       const selected = selectAuditQueue(auditQueue, availableAddresses, startedAt, num(prior.scanCount) + 1, settings.maxDeepAuditsPerCycle);
       const requested = reviewRequests.map(item => queueByAddress.get(addressKey(item.row.address))).find(item => item
         && availableAddresses.has(addressKey(item.address)) && !(item.status === 'HARD_REJECT' && item.nextAuditAt > startedAt));
@@ -493,6 +513,14 @@ export class Scanner {
         const index = selected.findIndex(item => addressKey(item.address) === addressKey(requested.address));
         if (index >= 0) selected.splice(index, 1);
         selected.unshift(requested);
+        selected.splice(settings.maxDeepAuditsPerCycle);
+      }
+      // 观察池最多保留一个位置，仍计入原预算；单位置时与即时请求轮流。
+      const watchSlot = watchDue[0] && queueByAddress.get(addressKey(watchDue[0].address));
+      if (watchSlot && (!requested || settings.maxDeepAuditsPerCycle > 1 || num(prior.scanCount) % 2 === 0)) {
+        const index = selected.findIndex(item => addressKey(item.address) === addressKey(watchSlot.address));
+        if (index >= 0) selected.splice(index, 1);
+        selected.unshift(watchSlot);
         selected.splice(settings.maxDeepAuditsPerCycle);
       }
       const candidatesByAddress = new Map((prior.candidates || []).map(row => cleanCandidate(row, chain)).filter(Boolean).map(row => [addressKey(row.address), row]));
@@ -506,27 +534,33 @@ export class Scanner {
       let events = prior.events || [];
       let lastAuditHealth = prior.sourceHealth?.lastAudit || null;
       let lastSecondaryHealth = prior.sourceHealth?.lastSecondary || null;
-      let auditHadError = false;
+      let auditHadError = Boolean(discoveryError);
       let auditsCompleted = 0;
 
       for (const queued of selected) {
         if (auditsCompleted && Date.now() - startedAt >= (settings.auditCycleBudgetMs || 80_000)) break;
         if (this.gmgn.nextAllowedAt > Date.now() || this.gmgn.disabled) break;
+        if (this.watchPool?.snapshot(chain).some(row => row.paused && addressKey(row.address) === addressKey(queued.address))) continue;
         const item = auditable.find(entry => addressKey(entry.row.address) === addressKey(queued.address));
         if (!item) continue;
         const token = publicToken(item.row, item.screen, chain);
         const visibleToken = cleanCandidate(token);
         try {
           const audit = await this.gmgn.audit(token.address, Math.floor(Date.now() / 1000), chain, {
+            deadline: startedAt + settings.auditCycleBudgetMs,
             shouldStopEarly: partial => classifyDeepResult(deepScreen({ discovery: item.row, audit: partial }, settings), partial._meta).status === 'HARD_REJECT'
           });
           if (this.gmgn.keyEpoch !== keyEpoch) return;
           const freshPrice = tokenInfoPrice(audit.info);
           if (freshPrice) { token.price = freshPrice; visibleToken.price = freshPrice; }
           if (item.row._monitorOnly) {
-            const supply = Number(audit.info?.circulating_supply);
-            if (freshPrice && supply > 0) token.marketCap = visibleToken.marketCap = freshPrice * supply;
-            token.liquidity = visibleToken.liquidity = num(audit.info?.liquidity, token.liquidity);
+            // 旧价格与旧流动性只能留在历史中，不能充当本次采样。
+            token.price = visibleToken.price = freshPrice;
+            const supply = numberOrNull(audit.info?.circulating_supply);
+            token.marketCap = visibleToken.marketCap = numberOrNull(audit.info?.market_cap)
+              ?? (freshPrice && supply > 0 ? freshPrice * supply : null);
+            token.liquidity = visibleToken.liquidity = numberOrNull(first(audit.pool?.liquidity, audit.info?.liquidity));
+            token.symbol = visibleToken.symbol = String(audit.info?.symbol || token.symbol).slice(0, 30);
           }
           const deep = deepScreen({ discovery: item.row, audit }, settings);
           const baseClassification = classifyDeepResult(deep, audit._meta || {});
@@ -562,9 +596,15 @@ export class Scanner {
             }
           }
           const classification = mergeSecondaryClassification(baseClassification, secondary);
+          if (this.gmgn.keyEpoch !== keyEpoch) return;
+          const watchedRisk = this.watchPool?.snapshot(chain).find(row => addressKey(row.address) === addressKey(token.address))?.riskLatched;
+          if (watchedRisk && classification.status === 'X_REVIEW') {
+            classification.status = 'WAIT_RECHECK';
+            classification.secondaryReason = '观察池保留历史风险，当前检查恢复不自动解除隔离';
+          }
           if (item.row._monitorOnly && classification.status === 'X_REVIEW') {
             classification.status = 'WAIT_RECHECK';
-            classification.secondaryReason = '已离开发现范围，继续跟踪风险；不作为新的通过候选';
+            classification.secondaryReason = '当前未通过发现初筛，继续观察风险；不作为新的通过候选';
           }
           const social = socialFrom(token);
           const auditedAt = Date.now();
@@ -590,6 +630,10 @@ export class Scanner {
           candidate.reviewRevision = previousCandidate?.reviewEvidence === candidate.reviewEvidence
             ? previousCandidate.reviewRevision : `${candidate.reviewEvidence}-${auditedAt}`;
           candidatesByAddress.set(addressKey(token.address), candidate);
+          const freshSupply = numberOrNull(audit.info?.circulating_supply);
+          this.watchPool?.record({ ...candidate, price: freshPrice,
+            marketCap: numberOrNull(audit.info?.market_cap) ?? (freshPrice && freshSupply > 0 ? freshPrice * freshSupply : null),
+            liquidity: numberOrNull(first(audit.pool?.liquidity, audit.info?.liquidity)) }, auditedAt);
           this.requestedReviews.delete(tokenKey(chain, token.address));
           const favorite = this.controls?.value.annotations[tokenKey(chain, token.address)]?.favorite;
           if (candidate.status === 'X_REVIEW' && previousCandidate?.status !== 'X_REVIEW') {
@@ -619,6 +663,7 @@ export class Scanner {
           outcomes = upsertOutcome(outcomes, candidate, auditedAt);
           outcomes = sampleRejected(outcomes, candidate, auditedAt);
         } catch (error) {
+          if (this.gmgn.keyEpoch !== keyEpoch) return;
           auditHadError = true;
           const auditedAt = Date.now();
           const queueItem = queueByAddress.get(addressKey(token.address));
@@ -637,6 +682,9 @@ export class Scanner {
             auditError: String(error?.message || '深度审计暂时失败，等待复查')
             ,reviewRevision: `error-${auditedAt}`
           });
+          this.watchPool?.record({ chain, address: token.address, status: 'WAIT_RECHECK',
+            auditError: String(error?.code || 'GMGN_REQUEST_FAILED'),
+            auditHealth: { complete: false }, deep: { failed: [] } }, auditedAt);
           lastAuditHealth = { complete: false, checkedAt: auditedAt, code: String(error?.code || 'GMGN_REQUEST_FAILED') };
           events = addEvent(events, 'AUDIT_RETRY', `${token.symbol}：深审暂时失败，已进入复查队列`, chain, { address: token.address });
           if (error?.code === 'GMGN_RATE_LIMITED') break;
@@ -669,7 +717,10 @@ export class Scanner {
         address: String(item.row.address || ''), symbol: String(item.row.symbol || '?').slice(0, 30),
         marketCap: marketCap(item.row), createdAt: createdAt(item.row), reasons: item.screen.reasons
       }));
-      const discoveryHealth = this.gmgn.lastDiscoveryHealth || { complete: true, checkedAt: now };
+      const discoveryHealth = discoveryError ? { complete: false, checkedAt: now,
+        trenches: { ok: false, code: String(discoveryError.code || 'GMGN_REQUEST_FAILED') },
+        trending: { ok: false, code: String(discoveryError.code || 'GMGN_REQUEST_FAILED') } }
+        : this.gmgn.lastDiscoveryHealth || { complete: true, checkedAt: now };
       const degraded = discoveryHealth.complete === false || auditHadError;
       const next = {
         ...prior,

@@ -180,6 +180,7 @@ export class GmgnClient {
     }
 
     const waitMs = Math.max(0, this.lastRequestAt + this.minRequestGapMs * this.lastWeight * this.backoffFactor - now);
+    if (now + waitMs >= deadline) throw translateGmgnError(new Error('GMGN_TIMEOUT'));
     if (waitMs) await delay(waitMs);
     if ((this.disabled && !verification) || epoch !== this.keyEpoch) throw translateGmgnError(new Error('invalid api key'));
     if (Date.now() >= deadline) throw translateGmgnError(new Error('GMGN_TIMEOUT'));
@@ -230,7 +231,8 @@ export class GmgnClient {
     // Preserve the provider cooldown: changing/disconnecting keys must not bypass it.
   }
 
-  async cachedRead(args, ttlMs = 0) {
+  async cachedRead(args, ttlMs = 0, options = {}) {
+    if (Date.now() >= (options.deadline ?? Infinity)) throw translateGmgnError(new Error('GMGN_TIMEOUT'));
     const epoch = this.keyEpoch;
     const key = JSON.stringify(args);
     const cached = this.cache.get(key);
@@ -238,7 +240,7 @@ export class GmgnClient {
       this.metrics.cacheHits++;
       return structuredClone(cached.value);
     }
-    const value = await this.run(args);
+    const value = await this.run(args, options);
     if (!this.disabled && epoch === this.keyEpoch) {
       this.cache.set(key, { value, at: Date.now(), epoch });
       if (this.cache.size > 500) this.cache.delete(this.cache.keys().next().value);
@@ -305,7 +307,8 @@ export class GmgnClient {
     return [...merged.values()];
   }
 
-  async audit(address, nowSec = Math.floor(Date.now() / 1000), chain = 'robinhood', { shouldStopEarly } = {}) {
+  async audit(address, nowSec = Math.floor(Date.now() / 1000), chain = 'robinhood', { shouldStopEarly, deadline = Infinity } = {}) {
+    if (Date.now() >= deadline) throw translateGmgnError(new Error('GMGN_TIMEOUT'));
     const base = ['--chain', chain, '--address', address, '--raw'];
     const from = String(nowSec - 20 * 60), to = String(nowSec);
     const specs = [
@@ -318,7 +321,7 @@ export class GmgnClient {
     ];
     // Static contract evidence is fetched first. Dynamic endpoints follow only after
     // the first stage has had a chance to surface provider-level failures.
-    const staticCalls = await Promise.allSettled(specs.slice(0, 3).map(([name, args]) => this.cachedRead(args, name === 'security' ? 60_000 : 15_000)));
+    const staticCalls = await Promise.allSettled(specs.slice(0, 3).map(([name, args]) => this.cachedRead(args, name === 'security' ? 60_000 : 15_000, { deadline })));
     const partial = {
       info: staticCalls[0].status === 'fulfilled' ? unwrap(staticCalls[0].value) : {},
       security: staticCalls[1].status === 'fulfilled' ? unwrap(staticCalls[1].value) : {},
@@ -326,7 +329,7 @@ export class GmgnClient {
       holders: [], traders: [], candles: [], _meta: { complete: false, earlyExit: true }
     };
     if (staticCalls.every(x => x.status === 'fulfilled') && shouldStopEarly?.(partial)) return partial;
-    const dynamicCalls = await Promise.allSettled(specs.slice(3).map(([, args]) => this.cachedRead(args, 15_000)));
+    const dynamicCalls = await Promise.allSettled(specs.slice(3).map(([, args]) => this.cachedRead(args, 15_000, { deadline })));
     const calls = [...staticCalls, ...dynamicCalls];
     const endpoints = Object.fromEntries(specs.map(([name], index) => [name,
       calls[index].status === 'fulfilled' ? { ok: true } : errorSummary(calls[index].reason)

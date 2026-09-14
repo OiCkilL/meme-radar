@@ -236,6 +236,27 @@ function publicCandidate(row = {}) {
   };
 }
 
+function publicWatchSample(value) {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    at: finiteOrNull(value.at), status: publicCode(value.status),
+    reasons: Array.isArray(value.reasons) ? value.reasons.slice(0, 32).map(reason => publicMessage(reason, '[redacted]', 160)) : [],
+    price: finiteOrNull(value.price), marketCap: finiteOrNull(value.marketCap), liquidity: finiteOrNull(value.liquidity),
+    error: publicMessage(value.error, '观察数据请求失败。', 160)
+  };
+}
+
+function publicWatchPool(rows) {
+  return (Array.isArray(rows) ? rows : []).filter(row => row && CHAIN_IDS.has(row.chain)).map(row => ({
+    chain: row.chain, address: publicMessage(row.address, '', 80), symbol: publicMessage(row.symbol, '?', 30),
+    label: publicMessage(row.label, '[redacted]', 80), source: row.source === 'manual' ? 'manual' : 'discovery',
+    reportedOutcome: ['USER_REPORTED_RUG', 'USER_REPORTED_GRADUATED'].includes(row.reportedOutcome) ? row.reportedOutcome : '',
+    firstSeenAt: finiteOrNull(row.firstSeenAt), lastSeenAt: finiteOrNull(row.lastSeenAt), nextCheckAt: finiteOrNull(row.nextCheckAt),
+    checkCount: finiteOrNull(row.checkCount), paused: row.paused === true, riskLatched: row.riskLatched === true,
+    latest: publicWatchSample(row.latest), history: Array.isArray(row.history) ? row.history.slice(-50).map(publicWatchSample).filter(Boolean) : []
+  }));
+}
+
 function publicRejected(row = {}) {
   return {
     address: text(row.address, 80),
@@ -570,7 +591,7 @@ function allowedChainIds(supportedChains) {
   return new Set(configured.length ? configured : CHAIN_IDS);
 }
 
-export function createServer({ state, settings, controls, switchChain, saveGmgnKey, disconnectGmgnKey, getGmgnOnboarding, getGmgnConnection, liveDiscovery, enqueueReview, supportedChains = [] }) {
+export function createServer({ state, settings, controls, switchChain, saveGmgnKey, disconnectGmgnKey, getGmgnOnboarding, getGmgnConnection, liveDiscovery, enqueueReview, watchPool, supportedChains = [] }) {
   const dashboard = path.join(settings.publicDir, 'index.html');
   const dashboardHtml = fs.readFileSync(dashboard, 'utf8');
   const csp = contentSecurityPolicy(dashboardHtml);
@@ -585,6 +606,29 @@ export function createServer({ state, settings, controls, switchChain, saveGmgnK
       url = new URL(req.url, `http://127.0.0.1:${settings.port}`);
     } catch {
       return sendJson(res, 400, { error: 'bad_request' }, csp);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/watch-pool') {
+      if (!req.headers.origin) return sendJson(res, 403, { error: 'local_request_required' }, csp);
+      if (!watchPool) return sendJson(res, 503, { error: 'watch_pool_unavailable' }, csp);
+      try {
+        const body = await readSmallJson(req, 1024);
+        const valid = body && typeof body === 'object' && !Array.isArray(body);
+        const allowed = body?.action === 'add' ? ['action', 'chain', 'address', 'label', 'reportedOutcome'] : ['action', 'chain', 'address', 'paused'];
+        if (!valid || !['add', 'pause'].includes(body.action) || Object.keys(body).some(key => !allowed.includes(key))
+          || !allowedChainIds(supportedChains).has(body.chain) || typeof body.address !== 'string'
+          || !(body.chain === 'sol' ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/ : /^0x[0-9a-fA-F]{40}$/).test(body.address)
+          || (body.action === 'pause' && typeof body.paused !== 'boolean')
+          || (body.action === 'add' && ((body.label !== undefined && (typeof body.label !== 'string' || body.label.length > 80))
+            || (body.reportedOutcome !== undefined && !['', 'USER_REPORTED_RUG', 'USER_REPORTED_GRADUATED'].includes(body.reportedOutcome))))) {
+          return sendJson(res, 400, { error: 'invalid_watch_request' }, csp);
+        }
+        if (body.action === 'add') await watchPool.add({ chain: body.chain, address: body.address, label: body.label || '', reportedOutcome: body.reportedOutcome || '' });
+        else await watchPool.setPaused({ chain: body.chain, address: body.address, paused: body.paused });
+        return sendJson(res, 200, { accepted: true }, csp);
+      } catch (error) {
+        return sendJson(res, [400, 404, 409, 413, 415].includes(error?.statusCode) ? error.statusCode : 500, { error: 'watch_request_failed' }, csp);
+      }
     }
 
     if (req.method === 'POST' && ['/api/live-discovery', '/api/live-review'].includes(url.pathname)) {
@@ -744,6 +788,7 @@ export function createServer({ state, settings, controls, switchChain, saveGmgnK
         note: publicMessage(value.note, '[redacted]', 500), updatedAt: finite(value.updatedAt)
       }]));
       const output = { ...toPublicStatus(selected), gmgnConnection, annotations,
+        watchPool: publicWatchPool(watchPool?.snapshot()),
         scheduler: { scanningChain: text(state.value.activeChain, 32), enabledChains: controls?.value.enabledChains || [state.value.activeChain],
           lastSuccessAt: finite(state.value.lastSuccessAt), status: text(state.value.status, 32) },
         coverage: Object.fromEntries([...CHAIN_IDS].map(id => [id, {
