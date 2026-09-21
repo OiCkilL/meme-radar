@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { config } from './config.mjs';
 import { atomicJson, readJsonWithBackup, tokenKey } from './local-store.mjs';
+import { nansenEvidence } from './nansen.mjs';
 
 const RETENTION_MS = 7 * 86400_000;
 const OUTCOMES = ['', 'USER_REPORTED_RUG', 'USER_REPORTED_GRADUATED'];
@@ -10,6 +11,22 @@ const fail = message => Object.assign(new Error(message), { statusCode: 400 });
 const finite = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
 const clean = (value, limit = 200) => typeof value === 'string' ? value.replace(/[\u0000-\u001f]/g, '').slice(0, limit) : '';
 const reasons = values => Array.isArray(values) ? values.filter(x => typeof x === 'string').slice(0, 30).map(x => clean(x)) : [];
+
+function chartRiskEvidence(source) {
+  if (!source || typeof source !== 'object') return null;
+  const version = finite(source.version);
+  const status = clean(source.status, 32);
+  if (!version && !status) return null;
+  return {
+    version: version || 0,
+    status: status || 'UNKNOWN',
+    pass: source.pass === true,
+    from: finite(source.from) || 0,
+    to: finite(source.to) || 0,
+    codes: Array.isArray(source.codes) ? source.codes.slice(0, 5).map(c => clean(c, 32)) : [],
+    reasons: Array.isArray(source.reasons) ? source.reasons.slice(0, 5).map(r => clean(r, 100)) : []
+  };
+}
 
 export class WatchPool {
   constructor(dir, { now = Date.now, maxEntries = 500 } = {}) {
@@ -99,7 +116,9 @@ export class WatchPool {
     const error = clean(candidate.auditError, 500);
     const result = { at, status: clean(candidate.status, 80) || 'WAIT_RECHECK',
       reasons: [...reasons(candidate.deep?.failed), ...reasons([candidate.decisionReason])],
-      price: finite(candidate.price), marketCap: finite(candidate.marketCap), liquidity: finite(candidate.liquidity), error };
+      price: finite(candidate.price), marketCap: finite(candidate.marketCap), liquidity: finite(candidate.liquidity),
+      chartRisk: chartRiskEvidence(candidate.deep?.chartRisk || candidate.chartRisk),
+      nansen: nansenEvidence(candidate.nansen), error };
     // 风险锁只增不减，后续恢复读数保留在历史中，不覆盖既有风险。
     item.riskLatched ||= candidate.deep?.security?.honeypot === true || candidate.secondary?.security?.verdict === 'FATAL';
     item.checkCount += 1;

@@ -22,6 +22,7 @@ function defaultState() {
     pendingChain: '',
     supportedChains: ['sol', 'bsc', 'base', 'eth', 'robinhood', 'arc', 'stable'],
     chainStates: {},
+    riskExclusions: {},
     scanCount: 0,
     discoveredCount: 0,
     prequalifiedCount: 0,
@@ -52,7 +53,9 @@ function migrateState(raw) {
     rejected: Array.isArray(raw.rejected) ? raw.rejected : [],
     auditQueue: Array.isArray(raw.auditQueue) ? raw.auditQueue : [],
     outcomes: Array.isArray(raw.outcomes) ? raw.outcomes : [],
-    events: Array.isArray(raw.events) ? raw.events : []
+    events: Array.isArray(raw.events) ? raw.events : [],
+    riskExclusions: raw.riskExclusions && typeof raw.riskExclusions === 'object' && !Array.isArray(raw.riskExclusions)
+      ? raw.riskExclusions : {}
   };
 }
 

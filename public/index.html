@@ -86,6 +86,41 @@
       --empty-ring-shadow: 0 4px 16px rgba(2, 132, 199, 0.08);
     }
 
+    :root[data-theme="dark"],
+    html[data-theme="dark"] {
+      color-scheme: only dark;
+      --bg-page: #07090c;
+      --bg-body-gradient: radial-gradient(ellipse at 50% 0%, #0d1e25 0%, transparent 45%), linear-gradient(180deg, #07090c 0%, #0a0d12 100%);
+      --dot-grid: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+      --bg-canvas: #0a0e13;
+      --bg-surface: #0f151c;
+      --bg-surface-elevated: #151d26;
+      --bg-hover: #1b2531;
+      --bg-hover-subtle: #121922;
+      --line: rgba(255, 255, 255, 0.055);
+      --line-strong: rgba(255, 255, 255, 0.1);
+      --line-soft: rgba(255, 255, 255, 0.025);
+      --text: #f1f5f9;
+      --muted: #8e9fae;
+      --muted-dark: #5a6b7b;
+      --green: #10b981;
+      --green-tint: rgba(16, 185, 129, 0.14);
+      --red: #f43f5e;
+      --red-tint: rgba(244, 63, 94, 0.14);
+      --amber: #f59e0b;
+      --amber-tint: rgba(245, 158, 11, 0.14);
+      --cyan: #06b6d4;
+      --cyan-tint: rgba(6, 182, 212, 0.14);
+      --blue: #3b82f6;
+      --blue-tint: rgba(59, 130, 246, 0.14);
+      --shadow-hairline: 0 0 0 1px var(--line);
+      --shadow-card: 0 6px 20px -2px rgba(0, 0, 0, 0.4);
+      --shadow-raised: 0 12px 36px -4px rgba(0, 0, 0, 0.6);
+      --empty-ring-bg: radial-gradient(circle, rgba(6, 182, 212, 0.16) 0%, rgba(15, 21, 28, 0.65) 75%);
+      --empty-ring-border: rgba(6, 182, 212, 0.3);
+      --empty-ring-shadow: 0 0 24px rgba(6, 182, 212, 0.15);
+    }
+
     /* 跟随系统浅色偏好 (System Preference - Light) */
     @media (prefers-color-scheme: light) {
       :root:not([data-theme="dark"]),
@@ -1266,10 +1301,44 @@
       font-size: 14px;
       margin-top: 10px;
       display: flex;
+      align-items: flex-end;
       justify-content: space-between;
-      gap: 12px;
+      gap: 16px 24px;
+      flex-wrap: wrap;
       line-height: 1.5;
-      padding: 0 4px;
+      padding: 8px 4px 4px;
+      border-top: 1px solid var(--line-soft);
+    }
+    .voice-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      min-width: 0;
+      flex: 1 1 280px;
+    }
+    .voice-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 12px;
+    }
+    .voice-panel input[type="range"] { width: 96px; accent-color: var(--cyan); }
+    .voice-panel [hidden] { display: none; }
+    .voice-help {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      max-width: min(90ch, 100%);
+      white-space: nowrap;
+    }
+    @media (max-width: 900px) {
+      .voice-help { white-space: normal; }
+    }
+    .footer-note {
+      flex: 0 1 auto;
+      text-align: right;
+      margin-left: auto;
     }
 
     .toast {
@@ -1296,8 +1365,9 @@
     .toast.show { opacity: 1; transform: translateY(0) scale(1); }
 
     dialog {
-      color-scheme: inherit;
+      color-scheme: dark;
       background: var(--bg-surface);
+      background-color: var(--bg-surface);
       color: var(--text);
       border: 1px solid var(--line-strong);
       border-radius: 14px;
@@ -1471,27 +1541,36 @@
 
     /* 系统与扫描设置对话框 (Settings Dialog) */
     .settings-dialog {
-      width: 90vw;
-      max-width: 680px;
-      border: 1px solid var(--line-strong);
-      border-radius: 14px;
-      background: var(--bg-surface);
-      color: var(--text);
+      color-scheme: only dark;
+      width: min(1120px, calc(100vw - 32px));
+      max-width: min(1120px, calc(100vw - 32px));
+      max-height: calc(100vh - 32px);
+      overflow: hidden;
+      border-radius: 12px;
       padding: 0;
+      background: var(--bg-surface);
+      background-color: var(--bg-surface);
+      color: var(--text);
       box-shadow: var(--shadow-raised);
       margin: auto;
     }
+    .settings-dialog[open] {
+      display: flex;
+      flex-direction: column;
+    }
     .settings-dialog::backdrop {
       background: rgba(0, 0, 0, 0.68);
-      backdrop-filter: blur(6px);
     }
     .settings-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 12px 18px;
-      border-bottom: 1px solid var(--line-soft);
-      background: var(--bg-surface-elevated);
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-surface);
+      background-color: var(--bg-surface);
+      color: var(--text);
+      flex: 0 0 auto;
     }
     .settings-header h2 {
       margin: 0;
@@ -1523,32 +1602,78 @@
       background: var(--red-tint);
     }
     .settings-body {
-      padding: 14px 18px 18px;
+      padding: 16px 20px 20px;
+      overflow-x: hidden;
       overflow-y: auto;
-      max-height: 80vh;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      overscroll-behavior: contain;
+      min-height: 0;
+      flex: 1 1 auto;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-content: start;
+      align-items: start;
+      gap: 14px;
+      background: var(--bg-surface);
+      background-color: var(--bg-surface);
+      color: var(--text);
     }
-    .settings-card {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: var(--bg-canvas);
-      padding: 12px 14px;
+    dialog.settings-dialog .settings-card {
+      -webkit-appearance: none;
+      appearance: none;
+      color-scheme: only dark;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      background: #151d26;
+      background-color: #151d26;
+      color: #f1f5f9;
+      padding: 14px 16px;
+      overflow: visible;
+      flex: 0 0 auto;
+      min-height: min-content;
+      max-height: none;
+      height: auto;
+    }
+    .settings-dialog input,
+    .settings-dialog textarea,
+    .settings-dialog select,
+    .settings-dialog button {
+      color-scheme: inherit;
+    }
+    @media (max-width: 900px) {
+      .settings-dialog {
+        width: min(760px, calc(100vw - 16px));
+        max-width: min(760px, calc(100vw - 16px));
+      }
+      .settings-body {
+        grid-template-columns: 1fr;
+      }
     }
     .settings-card-title {
       font-size: 14px;
       font-weight: 700;
-      color: var(--text);
-      margin: 0 0 6px 0;
+      color: #f1f5f9;
+      margin: 0 0 8px 0;
       display: flex;
       align-items: center;
-      gap: 6px;
+      justify-content: flex-start;
+      gap: 8px;
+      text-align: start;
+    }
+    .settings-card-title .lucide {
+      flex: 0 0 16px;
+      width: 16px;
+      height: 16px;
+      margin: 0;
+    }
+    .settings-card-title span {
+      flex: 0 1 auto;
+      margin: 0;
+      text-align: start;
     }
     .settings-card p {
       margin: 0 0 8px 0;
       font-size: 14px;
-      color: var(--muted);
+      color: #8e9fae;
       line-height: 1.45;
     }
     .settings-api-row {
@@ -1794,21 +1919,28 @@
     html[data-theme="light"] dialog,
     html[data-theme="light"] .settings-dialog {
       color-scheme: light;
-      background: #ffffff;
-      color: #0f172a;
-      border-color: rgba(15, 23, 42, 0.1);
-      box-shadow: 0 20px 40px -10px rgba(15, 23, 42, 0.12);
+      background: var(--bg-surface);
+      background-color: var(--bg-surface);
+      color: var(--text);
+      border-color: var(--line-strong);
+      box-shadow: var(--shadow-raised);
     }
     html[data-theme="light"] dialog::backdrop {
       background: rgba(15, 23, 42, 0.45);
     }
-    html[data-theme="light"] .settings-header {
-      background: #f8fafc;
-      border-bottom-color: rgba(15, 23, 42, 0.08);
-      color: #0f172a;
+    html[data-theme="light"] .settings-header,
+    html[data-theme="light"] .settings-body {
+      background: var(--bg-surface);
+      background-color: var(--bg-surface);
+      color: var(--text);
     }
-    html[data-theme="light"] .settings-card {
-      background: #f8fafc;
+    html[data-theme="light"] .settings-header {
+      border-bottom-color: var(--line);
+    }
+    html[data-theme="light"] dialog.settings-dialog .settings-card {
+      color-scheme: light;
+      background: #f1f5f9;
+      background-color: #f1f5f9;
       border-color: rgba(15, 23, 42, 0.08);
       color: #0f172a;
     }
@@ -1913,28 +2045,38 @@
       box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.04);
     }
 
-    /* 深色模式强化保证 */
     html[data-theme="dark"] dialog,
     html[data-theme="dark"] .settings-dialog {
-      color-scheme: dark;
-      background: #0f151c;
-      color: #f1f5f9;
-      border-color: rgba(255, 255, 255, 0.08);
+      color-scheme: only dark;
+      background: var(--bg-surface);
+      background-color: var(--bg-surface);
+      color: var(--text);
+      border-color: var(--line-strong);
     }
-    html[data-theme="dark"] .settings-header {
+    html[data-theme="dark"] .settings-header,
+    html[data-theme="dark"] .settings-body {
+      background: var(--bg-surface);
+      background-color: var(--bg-surface);
+      border-bottom-color: var(--line);
+      color: var(--text);
+    }
+    html[data-theme="dark"] dialog.settings-dialog .settings-card {
+      color-scheme: only dark;
       background: #151d26;
-      border-bottom-color: rgba(255, 255, 255, 0.06);
+      background-color: #151d26;
+      border-color: rgba(255, 255, 255, 0.08);
       color: #f1f5f9;
     }
-    html[data-theme="dark"] .settings-card {
-      background: #0a0e13;
-      border-color: rgba(255, 255, 255, 0.06);
+    html[data-theme="dark"] .settings-card-title {
       color: #f1f5f9;
+    }
+    html[data-theme="dark"] .settings-card p {
+      color: #8e9fae;
     }
     html[data-theme="dark"] .settings-api-input {
-      background: #0f151c;
-      border-color: rgba(255, 255, 255, 0.08);
-      color: #f1f5f9;
+      background: var(--bg-canvas);
+      border-color: var(--line);
+      color: var(--text);
     }
     html[data-theme="dark"] .scan-chain-card {
       background: #0f151c;
@@ -1945,7 +2087,7 @@
       border-color: #10b981;
     }
     html[data-theme="dark"] .scan-chain-card input[type="checkbox"] {
-      color-scheme: dark;
+      color-scheme: only dark;
       accent-color: #10b981;
     }
     html[data-theme="dark"] .toast {
@@ -2122,21 +2264,28 @@
       html:not([data-theme="dark"]) dialog,
       html:not([data-theme="dark"]) .settings-dialog {
         color-scheme: light;
-        background: #ffffff;
-        color: #0f172a;
-        border-color: rgba(15, 23, 42, 0.1);
-        box-shadow: 0 20px 40px -10px rgba(15, 23, 42, 0.12);
+        background: var(--bg-surface);
+        background-color: var(--bg-surface);
+        color: var(--text);
+        border-color: var(--line-strong);
+        box-shadow: var(--shadow-raised);
       }
       html:not([data-theme="dark"]) dialog::backdrop {
         background: rgba(15, 23, 42, 0.45);
       }
-      html:not([data-theme="dark"]) .settings-header {
-        background: #f8fafc;
-        border-bottom-color: rgba(15, 23, 42, 0.08);
-        color: #0f172a;
+      html:not([data-theme="dark"]) .settings-header,
+      html:not([data-theme="dark"]) .settings-body {
+        background: var(--bg-surface);
+        background-color: var(--bg-surface);
+        color: var(--text);
       }
-      html:not([data-theme="dark"]) .settings-card {
-        background: #f8fafc;
+      html:not([data-theme="dark"]) .settings-header {
+        border-bottom-color: var(--line);
+      }
+      html:not([data-theme="dark"]) dialog.settings-dialog .settings-card {
+        color-scheme: light;
+        background: #f1f5f9;
+        background-color: #f1f5f9;
         border-color: rgba(15, 23, 42, 0.08);
         color: #0f172a;
       }
@@ -2240,6 +2389,55 @@
         border: 1px solid rgba(15, 23, 42, 0.12);
         box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.04);
       }
+    }
+
+    html[data-theme="dark"] .settings-dialog {
+      color-scheme: only dark;
+      --bg-canvas: #0a0e13;
+      --bg-surface: #0f151c;
+      --bg-surface-elevated: #151d26;
+      --text: #f1f5f9;
+      --muted: #8e9fae;
+      --line: rgba(255, 255, 255, 0.055);
+      --line-strong: rgba(255, 255, 255, 0.1);
+      background: #0f151c !important;
+      background-color: #0f151c !important;
+      color: #f1f5f9 !important;
+    }
+    html[data-theme="dark"] .settings-dialog .settings-header,
+    html[data-theme="dark"] .settings-dialog .settings-body {
+      background: #0f151c !important;
+      background-color: #0f151c !important;
+      color: #f1f5f9 !important;
+    }
+    html[data-theme="dark"] .settings-dialog .settings-card {
+      -webkit-appearance: none !important;
+      appearance: none !important;
+      color-scheme: only dark;
+      background: #151d26 !important;
+      background-color: #151d26 !important;
+      color: #f1f5f9 !important;
+      border-color: rgba(255, 255, 255, 0.08) !important;
+    }
+    html[data-theme="dark"] .settings-dialog .settings-card-title,
+    html[data-theme="dark"] .settings-dialog .settings-card-title span {
+      color: #f1f5f9 !important;
+    }
+    html[data-theme="dark"] .settings-dialog .settings-card p,
+    html[data-theme="dark"] .settings-dialog .settings-card .muted,
+    html[data-theme="dark"] .settings-dialog .settings-card label,
+    html[data-theme="dark"] .settings-dialog .api-key-status {
+      color: #8e9fae !important;
+    }
+    html[data-theme="dark"] .settings-dialog .settings-card a {
+      color: #67e8f9;
+    }
+    html[data-theme="dark"] .settings-dialog .settings-api-input {
+      color-scheme: only dark;
+      background: #0a0e13 !important;
+      background-color: #0a0e13 !important;
+      color: #f1f5f9 !important;
+      border-color: rgba(255, 255, 255, 0.1) !important;
     }
   </style>
 </head>
@@ -2517,7 +2715,17 @@
     </details>
 
     <div class="footer">
-      <span data-i18n="footerLocal">独立端口3791 · 只扫描、不交易 · 人工标记仅保存在当前浏览器。</span>
+      <section class="voice-panel" aria-label="Voice alerts">
+        <div class="voice-controls">
+          <strong id="voiceTitle">候选语音提醒</strong>
+          <button id="voiceEnable" type="button" class="mini-button">试听并开启</button>
+          <button id="voiceStop" type="button" class="mini-button" hidden>关闭</button>
+          <label><span id="voiceVolumeLabel">音量</span> <input id="voiceVolume" type="range" min="0" max="100" value="50" aria-label="Volume"></label>
+          <span id="voiceStatus" class="muted" role="status" aria-live="polite"></span>
+        </div>
+        <p id="voiceHelp" class="voice-help">只提醒新完成链上筛选的候选，仍需人工复核。</p>
+      </section>
+      <span class="footer-note" data-i18n="footerLocal">独立端口3791 · 只扫描、不交易 · 人工标记仅保存在当前浏览器。</span>
     </div>
   </main>
 
@@ -2531,8 +2739,8 @@
     </div>
     <div class="settings-body">
       <!-- 模块 1：GMGN API 配置与公钥绑定 -->
-      <section class="settings-card">
-        <h3 class="settings-card-title"><svg class="lucide" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></svg> <span data-i18n="gmgnApiLabel">GMGN API 凭据配置</span></h3>
+      <div class="settings-card" role="group">
+        <h3 class="settings-card-title"><svg class="lucide" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></svg><span data-i18n="gmgnApiLabel">GMGN API 凭据配置</span></h3>
         <p data-i18n="authNotice">输入你的 GMGN 只读 API Key，验证后自动开始扫描。没有 Key 可点击“首次使用 / 创建 API”。</p>
         <form id="gmgnKeyForm" class="settings-api-row">
           <input id="gmgnKeyInput" class="settings-api-input" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" maxlength="256" data-ltr aria-describedby="gmgnKeyStatus" placeholder="输入 API Key" data-i18n-placeholder="gmgnApiPlaceholder">
@@ -2543,13 +2751,45 @@
           <span id="gmgnKeyStatus" class="api-key-status" role="status" aria-live="polite" data-i18n="gmgnApiLocalOnly">仅发往本机</span>
           <button id="gmgnOnboardingButton" class="mini-button" type="button"><svg class="lucide" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></svg> <span data-i18n="gmgnApiGetKey">首次使用 / 创建 API</span></button>
         </div>
-      </section>
+      </div>
+
+      <div class="settings-card" role="group" aria-labelledby="nansenSettingsTitle">
+        <h3 id="nansenSettingsTitle" class="settings-card-title"><svg class="lucide" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10a7.31 7.31 0 0 0 10 10Z"/><path d="m9 15 3-3"/><path d="M17 13a6 6 0 0 0-6-6"/><path d="M21 13A10 10 0 0 0 11 3"/></svg><span>Nansen 可选复查数据源</span></h3>
+        <p>可选功能，默认关闭，不影响 GMGN 扫描。开启后在复查时查询普通持仓前 20 条，不含高级标签，可能消耗 Nansen API credits。</p>
+        <p>支持 Solana / BSC / Base / Ethereum / Robinhood；其余链自动跳过。保存不验证 Key，有效性在后续复查时确认。</p>
+        <form id="nansenSettingsForm">
+          <label class="manage-actions"><input id="nansenEnabled" type="checkbox"> 启用复查时调用 Nansen</label>
+          <div class="settings-api-row">
+            <input id="nansenKeyInput" class="settings-api-input" type="password" maxlength="512" autocomplete="off" spellcheck="false" autocapitalize="none" aria-label="Nansen API Key" aria-describedby="nansenSettingsStatus" placeholder="输入新 Key；留空保留已保存 Key">
+            <button id="nansenSave" class="mini-button" type="submit">保存 Nansen 设置</button>
+            <button id="nansenClear" class="mini-button ignore" type="button">清除 Key 并关闭</button>
+          </div>
+        </form>
+        <p id="nansenSettingsStatus" class="api-key-status" role="status" aria-live="polite">尚未配置 Key · 默认关闭</p>
+      </div>
+
+      <div class="settings-card" role="group" aria-labelledby="aveSettingsTitle">
+        <h3 id="aveSettingsTitle" class="settings-card-title"><svg class="lucide" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span>AVE API</span></h3>
+        <p>检测行情和交易服务连接。不签名、不下单。雷达只打开代币页，实际买卖在 AVE 页面确认。</p>
+        <form id="ave-key-form" class="settings-api-row">
+          <label class="visually-hidden" for="ave-api-key">AVE API Key</label>
+          <input id="ave-api-key" class="settings-api-input" type="password" autocomplete="off" spellcheck="false" maxlength="1024" placeholder="AVE API Key">
+          <button type="submit" class="mini-button">保存 / 测试</button>
+          <button type="button" class="mini-button ignore" id="ave-remove">移除 Key</button>
+        </form>
+        <p id="ave-config-status" class="api-key-status" role="status" aria-live="polite">未配置</p>
+        <p class="muted">行情服务：<span id="ave-data-status">未配置</span> · 交易服务（只读）：<span id="ave-trade-status">未配置</span></p>
+        <p class="muted">行情测试约 5 CU；交易服务只查 Gas。保存后可留空重测已保存 Key。</p>
+        <p class="muted"><a href="https://cloud.ave.ai/" target="_blank" rel="noopener noreferrer">AVE API 管理</a></p>
+      </div>
 
       <!-- 模块 2：多链轮询与扫描设置 -->
-      <section class="settings-card">
-        <h3 class="settings-card-title"><svg class="lucide" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg> <span data-i18n="manageTitle">扫描设置与记录</span></h3>
+      <div class="settings-card" role="group">
+        <h3 class="settings-card-title"><svg class="lucide" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg><span data-i18n="manageTitle">扫描设置与记录</span></h3>
         <p data-i18n="scanSelectionHelp">选择1–3条链轮询，共享接口额度；切换上方标签只改变查看页面。</p>
         <div id="scanSelection" class="scan-chains-grid"></div>
+        <label class="manage-actions"><input id="chartRiskExclusionEnabled" type="checkbox"> 形态命中后永久排除，不再复查</label>
+        <p class="muted">默认关闭：K 线形态命中只当次待复查，观察池仍会继续盯。打开后按链＋合约写入排除表，重启也不自动取消；关闭开关只停止使用该表，不清空已记录项。</p>
         <div class="manage-actions">
           <button id="saveChains" class="mini-button" type="button" data-i18n="saveChains">保存扫描链</button>
           <button id="notificationButton" class="mini-button" type="button" data-i18n="enableAlerts">开启桌面提醒</button>
@@ -2557,7 +2797,7 @@
         </div>
         <p id="schedulerDetail" class="muted"></p>
         <p data-i18n="alertLimit" class="muted">桌面提醒需要本页保持打开并允许通知；静音后仍保留页面事件。</p>
-      </section>
+      </div>
     </div>
   </dialog>
 
@@ -2851,6 +3091,8 @@
       scanBusy: ['当前扫描尚未结束，请稍后再切换', '目前掃描尚未結束，請稍後再切換', 'A scan is still running; switch later', 'スキャン中です。後で切替えてください', '스캔이 진행 중입니다. 잠시 후 전환하세요', 'المسح جارٍ؛ بدّل لاحقًا'],
       switchFailed: ['链路切换失败，请稍后重试', '鏈路切換失敗，請稍後重試', 'Chain switch failed; try again later', '切替に失敗。後でもう一度お試しください', '체인 전환 실패; 나중에 다시 시도하세요', 'فشل تبديل الشبكة؛ حاول لاحقًا'],
       copyContract: ['复制合约', '複製合約', 'Copy contract', 'コントラクトをコピー', '계약 복사', 'نسخ العقد'],
+      aveTrade: ['AVE 交易', 'AVE 交易', 'Trade on AVE', 'AVEで取引', 'AVE 거래', 'تداول على AVE'],
+      aveTokenHint: ['查看代币 K 线与买卖', '查看代幣 K 線與買賣', 'View token chart and trading', 'トークンのチャート・取引を表示', '토큰 차트·거래 보기', 'عرض الرسم البياني وتداول العملة'],
       gmgnDetails: ['GMGN详情', 'GMGN詳情', 'GMGN details', 'GMGN詳細', 'GMGN 상세', 'تفاصيل GMGN'],
       officialX: ['官方X账号', '官方X帳號', 'Official X', '公式X', '공식 X', 'حساب X الرسمي'],
       liveXSearch: ['X实时搜索', 'X即時搜尋', 'Live X search', 'Xリアルタイム検索', 'X 실시간 검색', 'بحث X المباشر'],
@@ -3248,7 +3490,8 @@
         return escapeHtml(row.status || '等待复查') + ' · 市值 ' + escapeHtml(formatMoney(row.marketCap))
           + ' · 流动性 ' + escapeHtml(formatMoney(row.liquidity)) + ' · 价格 ' + escapeHtml(row.price == null ? '--' : row.price)
           + '<div>' + (row.reasons || []).map(function (reason) { return escapeHtml(reason); }).join('；') + '</div>'
-          + (row.error ? '<div class="warn">' + escapeHtml(row.error) + '</div>' : '');
+          + (row.error ? '<div class="warn">' + escapeHtml(row.error) + '</div>' : '')
+          + (row.nansen ? renderNansenReview(row.nansen) : '');
       };
       byId('watchRows').innerHTML = rows.slice(0, 100).map(function (row) {
         const outcome = row.reportedOutcome === 'USER_REPORTED_RUG' ? '疑似 rug（用户标注，未核验）'
@@ -3280,6 +3523,7 @@
           + '<span class="scan-chain-coverage">' + escapeHtml(t(covered ? 'coverageDual' : 'coverageSingle')) + '</span>'
           + '</div></label>';
       }).join('');
+      byId('chartRiskExclusionEnabled').checked = data.chartRiskExclusion === true;
       byId('schedulerDetail').textContent = t('schedulerSummary', { chains: enabled.join(' / '), current: scheduler.scanningChain || activeChain(data) });
       byId('notificationButton').textContent = t(alertsEnabled ? 'muteAlerts' : 'enableAlerts');
       byId('savedNotes').innerHTML = Object.values(data.annotations || {}).map(function (row) {
@@ -3402,6 +3646,9 @@
           if (ordinaryKnown && botKnown && linkedKnown && Number(wallets.ordinaryCount) >= policy.minOrdinaryWallets && Number(wallets.botHoldRate) <= policy.maxBotHoldRate && Number(wallets.linkedHoldRate) <= policy.maxLinkedHoldRate) add('普通钱包综合检查未通过');
         } else if (code === 'observation') {
           add(safeMessage(observation.reason, '5分钟盘面观察未通过') + '；5分钟涨跌' + formatPercent(observation.return5m) + '，最大回撤' + formatPercent(observation.maxDrawdown) + '，单根量能占比' + formatPercent(observation.volumeConcentration));
+        } else if (code === 'chartRisk') {
+          const reasons = (row.deep && row.deep.chartRisk && row.deep.chartRisk.reasons) || [];
+          add(reasons.length ? reasons.join('；') : 'K线形态风险检查未通过');
         } else add('存在尚未中文化的审计项，请在GMGN详情中复核');
       });
 
@@ -3423,6 +3670,9 @@
     }
 
     function backendDisposition(row) {
+      if (row.deep && (!row.deep.chartRisk || row.deep.chartRisk.version !== 1)) {
+        if (row.status === 'X_REVIEW' || row.status === 'QUALIFIED' || row.deep.chainPass) return 'waiting';
+      }
       if (row.status === 'X_REVIEW' || row.status === 'QUALIFIED') return 'chain';
       if (row.status === 'WAIT_RECHECK') return 'waiting';
       if (row.status === 'HARD_REJECT' || row.status === 'REJECTED') return 'rejected';
@@ -3526,6 +3776,19 @@
       return '';
     }
 
+    const AVE_EVM_CHAINS = new Set(['bsc', 'eth', 'base', 'xlayer', 'polygon', 'arbitrum',
+      'optimism', 'monad', 'core', 'plasma', 'morph', 'hyperevm', 'eni', 'fsc', 'anubis',
+      'robinhood', 'stable', 'arc']);
+    function aveTokenUrl(chain, address) {
+      if (typeof chain !== 'string' || typeof address !== 'string') return null;
+      const slug = ({ sol: 'solana', ethereum: 'eth' })[chain.trim().toLowerCase()] || chain.trim().toLowerCase();
+      const ca = address.trim();
+      if (slug === 'solana') {
+        if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(ca)) return null;
+      } else if (!AVE_EVM_CHAINS.has(slug) || !/^0x[0-9a-fA-F]{40}$/.test(ca)) return null;
+      return 'https://pro.ave.ai/token/' + encodeURIComponent(ca) + '-' + slug;
+    }
+
     function actionLinks(row) {
       const address = String(row.address || '');
       const encodedAddress = encodeURIComponent(address);
@@ -3539,6 +3802,8 @@
       const website = safeUrl(row.info && row.info.website);
       let result = '<div class="links">';
       result += '<button class="mini-button" type="button" data-action="copy" data-address="' + encodedData + '">' + lucide('copy') + escapeHtml(t('copyContract')) + '</button>';
+      const tokenUrl = aveTokenUrl(rowChain, address);
+      if (tokenUrl) result += '<a href="' + escapeHtml(tokenUrl) + '" target="_blank" rel="noopener noreferrer" title="' + escapeHtml(t('aveTokenHint')) + '">' + escapeHtml(t('aveTrade')) + '</a>';
       result += '<a href="' + escapeHtml(gmgnUrl) + '" target="_blank" rel="noopener noreferrer">' + lucide('external') + escapeHtml(t('gmgnDetails')) + '</a>';
       if (officialX) result += '<a href="' + escapeHtml(officialX) + '" target="_blank" rel="noopener noreferrer">' + lucide('x') + escapeHtml(t('officialX')) + '</a>';
       result += '<a href="' + escapeHtml(searchX) + '" target="_blank" rel="noopener noreferrer">' + lucide('search') + escapeHtml(t('liveXSearch')) + '</a>';
@@ -3591,7 +3856,7 @@
       const goPlusTone = secondarySecurity.verdict === 'FATAL' ? 'bad' : secondarySecurity.verdict === 'NO_FATAL_FLAGS' ? 'good' : 'warn';
 
       return '<tr class="' + freshness.className + '">' +
-        '<td><div class="token-title-row"><span class="symbol">' + escapeHtml(row.symbol || '?') + '</span>' + tokenReviewBadge(row) + '</div><div>' + escapeHtml(row.name || '') + '</div><div class="addr mono">' + escapeHtml(address.slice(0, 8)) + '…' + escapeHtml(address.slice(-6)) + '</div>' + actionLinks(row) + '</td>' +
+        '<td><div class="token-title-row"><span class="symbol">' + escapeHtml(row.symbol || '?') + '</span>' + tokenReviewBadge(row) + '</div><div>' + escapeHtml(row.name || '') + '</div><div class="addr mono">' + escapeHtml(address.slice(0, 8)) + '…' + escapeHtml(address.slice(-6)) + '</div>' + actionLinks(row) + (row.nansen ? renderNansenReview(row.nansen) : '') + '</td>' +
         '<td class="mono">' + formatMoney(row.marketCap) + '<br><span class="muted">' + escapeHtml(t('liquidity', { value: formatMoney(security.liquidity !== undefined ? security.liquidity : row.liquidity) })) + '</span><br><span class="' + (dexStatus === 'OK' ? 'good' : 'warn') + '">' + escapeHtml(dexLabel) + '</span></td>' +
         '<td>' + escapeHtml(ageLabel) + '<div class="audit-age ' + freshness.tone + '">' + escapeHtml(freshness.label) + '</div></td>' +
         '<td class="stack">' + checkLine(checks.openSource, t('openSource'), waitingForRecheck) + checkLine(checks.ownerRenounced, permissionLabel, waitingForRecheck) + '<span class="' + goPlusTone + '">' + escapeHtml(goPlusLabel) + '</span></td>' +
@@ -4081,6 +4346,8 @@
       renderOutcomes(data);
       renderChainSwitcher(data);
       renderGmgnConnection(data);
+      renderNansenSettings(data);
+      renderAveSettings(data);
       renderManagement(data);
       renderWatchPool(data);
       renderTelemetry();
@@ -4165,6 +4432,106 @@
         status.className = 'onboarding-status bad';
       }
     }
+
+    // Nansen settings start
+    let nansenDirty = false;
+    let nansenBusy = false;
+    function renderNansenSettings(data) {
+      const saved = data && data.nansen || {};
+      if (!nansenDirty && !nansenBusy) byId('nansenEnabled').checked = saved.enabled === true;
+      if (!nansenDirty && !nansenBusy) byId('nansenSettingsStatus').textContent = saved.configurationError === 'INVALID_LOCAL_CONFIG'
+        ? '本地 Nansen 配置无法读取，已停用，可重新保存或清除。' : saved.configured
+        ? 'Key 已保存 · ' + (saved.enabled ? '已启用，待后续复查请求验证有效性' : '已关闭，不调用 Nansen')
+        : '尚未配置 Key · 默认关闭';
+    }
+    function setNansenBusy(busy) {
+      nansenBusy = busy;
+      ['nansenSave', 'nansenClear', 'nansenKeyInput', 'nansenEnabled'].forEach(function (id) { byId(id).disabled = busy; });
+    }
+    async function writeNansenSettings(body) {
+      if (nansenBusy) return;
+      setNansenBusy(true);
+      byId('nansenSettingsStatus').textContent = '正在保存本机设置…';
+      try {
+        const result = await postLocal('/api/nansen-settings', body);
+        if (!result.saved || !result.nansen) throw new Error('invalid_response');
+        byId('nansenKeyInput').value = '';
+        nansenDirty = false;
+        setNansenBusy(false);
+        renderNansenSettings(result);
+        await refresh();
+      } catch {
+        nansenDirty = true;
+        byId('nansenSettingsStatus').textContent = '设置保存失败，请检查本机服务及 Key 格式后重试；尚未验证 Key。';
+      } finally { setNansenBusy(false); }
+    }
+    async function saveNansenSettings(event) {
+      event.preventDefault();
+      const body = { enabled: byId('nansenEnabled').checked };
+      const key = byId('nansenKeyInput').value.trim();
+      if (key) body.apiKey = key;
+      await writeNansenSettings(body);
+    }
+    async function clearNansenSettings() { await writeNansenSettings({ action: 'clear' }); }
+    function renderNansenReview(review) {
+      if (!review) return '';
+      const status = { OK: '已获取', SUCCESS: '已获取', EMPTY: '未返回持仓', DISABLED: '未启用', UNCONFIGURED: '未配置', UNSUPPORTED: '当前链不支持', ERROR: '请求失败', TIMEOUT: '请求超时', TIME_BUDGET: '本轮预算不足，已跳过', RATE_LIMITED: '限流等待', CANCELLED: '配置变更，已取消', SKIPPED: '已跳过' };
+      const holders = (review.holders || []).slice(0, 20);
+      const value = function (v) { return escapeHtml(v == null ? '未知' : v); };
+      return '<details class="nansen-review"><summary>Nansen · ' + escapeHtml(status[review.status] || review.status || '未知')
+        + ' · 采样 ' + value(review.sampleCount) + ' 条（非完整持仓）</summary>'
+        + '<p class="muted">普通持仓样本，不含高级标签；不代表安全，不改变风险判定。检查时间：' + escapeHtml(review.checkedAt ? formatClock(review.checkedAt) : '未知')
+        + (review.errorCode ? ' · ' + escapeHtml(review.errorCode) : '') + '</p>'
+        + holders.map(function (row) { return '<div class="saved-row"><span class="mono">' + escapeHtml(row.address || '未知地址') + '</span> · ' + escapeHtml(row.label || '标签未知')
+          + '<div>数量 ' + value(row.tokenAmount) + ' · 占比 (%) ' + value(row.ownershipPercentage) + ' · 24h 余额变化 ' + value(row.balanceChange24h) + ' · 价值 (USD) ' + value(row.valueUsd) + '</div></div>'; }).join('')
+        + (holders.length ? '' : '<p class="muted">无可用持仓证据，不等于零持仓或无风险。</p>') + '</details>';
+    }
+    byId('nansenEnabled').addEventListener('change', function () { nansenDirty = true; });
+    byId('nansenKeyInput').addEventListener('input', function () { nansenDirty = true; });
+    byId('nansenSettingsForm').addEventListener('submit', saveNansenSettings);
+    byId('nansenClear').addEventListener('click', clearNansenSettings);
+    // Nansen settings end
+
+    let aveBusy = false;
+    function renderAveSettings(data) {
+      const snapshot = data && data.ave;
+      if (aveBusy) return;
+      const configText = snapshot && snapshot.requiresReentry ? '请重新填写并验证 AVE API Key'
+        : snapshot && snapshot.configured ? 'Key 已保存' : '未配置';
+      byId('ave-config-status').textContent = configText;
+      ['data', 'trade'].forEach(function (kind) {
+        const status = snapshot && snapshot[kind] && snapshot[kind].status;
+        byId('ave-' + kind + '-status').textContent = status === 'connected' ? '只读测试通过'
+          : status === 'error' ? '连接未通过'
+            : snapshot && snapshot[kind] && snapshot[kind].configured ? '已保存 · 待测试' : '未配置';
+      });
+    }
+    async function changeAve(action) {
+      if (aveBusy) return;
+      aveBusy = true;
+      document.querySelectorAll('#ave-key-form button').forEach(function (button) { button.disabled = true; });
+      byId('ave-config-status').textContent = '测试中…';
+      try {
+        const body = {};
+        if (action === 'configure') body.key = byId('ave-api-key').value;
+        const response = await fetch('/api/ave-' + action, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body), signal: AbortSignal.timeout(30000)
+        });
+        const result = await response.json();
+        if (result.ave) renderAveSettings({ ave: result.ave });
+        if (!response.ok) throw new Error(/^[A-Z_]{1,40}$/.test(result.error) ? result.error : 'AVE_REQUEST');
+        byId('ave-api-key').value = '';
+        renderAveSettings({ ave: result.ave });
+      } catch (error) {
+        byId('ave-config-status').textContent = '连接未通过 · ' + (/^AVE_[A-Z_]{1,30}$/.test(error.message) ? error.message : 'AVE_CONNECT');
+      } finally {
+        aveBusy = false;
+        document.querySelectorAll('#ave-key-form button').forEach(function (button) { button.disabled = false; });
+      }
+    }
+    byId('ave-key-form').addEventListener('submit', function (event) { event.preventDefault(); void changeAve('configure'); });
+    byId('ave-remove').addEventListener('click', function () { void changeAve('remove'); });
 
     let gmgnKeyMessageKey = '';
     let gmgnKeyMessageError = false;
@@ -4259,7 +4626,9 @@
         serviceOnline = true;
         offlineSince = 0;
         render(data);
+        if (data.voiceSnapshot) window.dispatchEvent(new CustomEvent('radar-snapshot', { detail: data.voiceSnapshot }));
       } catch {
+        window.dispatchEvent(new CustomEvent('radar-offline'));
         if (!offlineSince) offlineSince = Date.now();
         if (Date.now() - offlineSince > 5 * 60000) desktopAlert('offline:' + offlineSince, t('failureAlert'), t('localOffline'), Date.now());
         serviceOnline = false;
@@ -4442,6 +4811,17 @@
     });
     byId('closeGmgnOnboarding').addEventListener('click', function () { byId('gmgnOnboardingDialog').close(); });
     byId('scanSelection').addEventListener('change', function () { selectedChainsDirty = true; });
+    byId('chartRiskExclusionEnabled').addEventListener('change', async function (event) {
+      const enabled = event.target.checked === true;
+      try {
+        await postLocal('/api/preferences', { chartRiskExclusion: enabled });
+        if (lastData) lastData.chartRiskExclusion = enabled;
+        showToast(t('settingsSaved'));
+      } catch {
+        event.target.checked = !enabled;
+        showToast(t('settingsFailed'));
+      }
+    });
     byId('saveChains').addEventListener('click', async function () {
       const chains = Array.from(byId('scanSelection').querySelectorAll('input:checked')).map(function (input) { return input.value; });
       if (!chains.length || chains.length > 3) return showToast(t('chainSelectionInvalid'));
@@ -4633,5 +5013,6 @@
       setInterval(renderCandidates, 60000);
     }
   </script>
+  <script type="module" src="/voice-ui.mjs"></script>
 </body>
 </html>

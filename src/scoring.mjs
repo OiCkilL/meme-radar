@@ -1,3 +1,5 @@
+import { chartRiskScreen } from './chart-risk.mjs';
+
 const NUMBER_PATTERN = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
 
 function optionalNumber(value) {
@@ -129,6 +131,21 @@ export function createdAt(row) {
   return num(first(row.creation_timestamp, row.created_timestamp, row.open_timestamp));
 }
 
+// 已知不利事实由两处发现入口共享。缺失事实保持未知，在触发报警前仍须通过完整深审。
+export function knownRiskReasons(row, config) {
+  const reasons = [];
+  const lp = optionalNumber(row.liquidity);
+  const buy = optionalRate(row.buy_tax), sell = optionalRate(row.sell_tax);
+  const dev = optionalRate(first(row.dev_team_hold_rate, row.creator_balance_rate, row.creator_hold_rate));
+  if (lp !== null && lp < config.strictLiquidity) reasons.push('流动性低于深审门槛');
+  if ((buy !== null && buy > config.maxBuyTax) || (sell !== null && sell > config.maxSellTax)
+    || (buy !== null && sell !== null && Math.abs(buy - sell) > config.maxTaxAsymmetry)) reasons.push('交易税超过风险门槛');
+  if (dev !== null && dev > .01) reasons.push('DEV持仓超过1%');
+  // 绝不将实时数据流的通用1分钟计数器误判为5分钟活动
+  if (optionalNumber(row.volume_5m) === 0) reasons.push('近5分钟无成交，暂不进入候选');
+  return reasons;
+}
+
 export function discoveryScreen(row, config, nowSec = Date.now() / 1000) {
   const mcValue = optionalNumber(first(row.market_cap, row.usd_market_cap, row.mcp));
   const createdValue = optionalNumber(first(row.creation_timestamp, row.created_timestamp, row.open_timestamp));
@@ -142,7 +159,7 @@ export function discoveryScreen(row, config, nowSec = Date.now() / 1000) {
   const created = createdValue ?? 0;
   const ageSec = created > 0 ? nowSec - created : 0;
   const liquidity = liquidityValue ?? 0;
-  const reasons = [];
+  const reasons = knownRiskReasons(row, config);
   if (!validAddressForChain(row.address, config.chain)) reasons.push('地址格式异常');
   if (createdValue === null || created <= 0) reasons.push('创建时间未知');
   else if (!(ageSec >= config.minAgeSec)) reasons.push('创建不足5分钟');
@@ -545,13 +562,13 @@ export function deepScreen({ discovery, audit, nowMs = Date.now() }, config) {
   const lpBurned = lower(sec.burnStatus) === 'burn';
   const wallets = analyzeWallets(audit.holders, config);
   const observation = observeFiveMinutes(audit.candles, nowMs);
+  const chartRisk = chartRiskScreen(audit.candles, nowMs);
   const marketBehavior = marketBehaviorScreen({
     discovery, info, holders: audit.holders, observation, nowMs
   }, config);
   const sellability = empiricalSellability({ info, discovery, traders: audit.traders, nowSec: nowMs / 1000, chain: config.chain });
   const exactNotHoneypot = honeypot === false;
   const explicitHoneypot = honeypot === true;
-  const creatorClosed = normalizedCreatorStatus(sec.creatorStatus) === 'EXITED';
   const checks = {
     openSource: openSource === true,
     ownerRenounced: isSol ? renouncedMint === true && renouncedFreezeAccount === true : ownerRenounced === true,
@@ -562,7 +579,7 @@ export function deepScreen({ discovery, audit, nowMs = Date.now() }, config) {
       && Math.abs(buyTax - sellTax) <= config.maxTaxAsymmetry,
     rug: rugRatio !== null && rugRatio <= config.maxRugRatio,
     concentration: top10 !== null && top10 <= config.maxTop10Rate,
-    dev: creatorClosed || (devHold !== null && devHold <= 0.01),
+    dev: devHold !== null && devHold <= 0.01,
     insider: insider !== null && insider <= config.maxInsiderRate,
     bundler: bundler !== null && bundler <= config.maxBundlerRate,
     sniper: sniperHold !== null && sniperHold <= config.maxSniperHoldRate,
@@ -570,6 +587,7 @@ export function deepScreen({ discovery, audit, nowMs = Date.now() }, config) {
     liquidity: liquidityValue !== null && liquidity >= config.strictLiquidity,
     wallets: wallets.pass,
     observation: observation.pass,
+    chartRisk: chartRisk.pass,
     marketBehavior: marketBehavior.pass
   };
   const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
@@ -586,7 +604,7 @@ export function deepScreen({ discovery, audit, nowMs = Date.now() }, config) {
     sellTax === null ? 'sellTax' : null,
     rugRatio === null ? 'rugRatio' : null,
     top10 === null ? 'top10' : null,
-    !creatorClosed && devHold === null ? 'devHold' : null,
+    devHold === null ? 'devHold' : null,
     insider === null ? 'insider' : null,
     bundler === null ? 'bundler' : null,
     sniperHold === null ? 'sniperHold' : null,
@@ -595,6 +613,7 @@ export function deepScreen({ discovery, audit, nowMs = Date.now() }, config) {
     liquidityValue === null ? 'liquidity' : null,
     ...wallets.unknownFields,
     ...observation.unknownFields,
+    ...chartRisk.unknownFields,
     ...(!isSol && honeypot !== false ? sellability.unknownFields : [])
   ].filter(Boolean);
   const blockingUnknownFields = [
@@ -607,7 +626,7 @@ export function deepScreen({ discovery, audit, nowMs = Date.now() }, config) {
     sellTax === null ? 'sellTax' : null,
     rugRatio === null ? 'rugRatio' : null,
     top10 === null ? 'top10' : null,
-    !creatorClosed && devHold === null ? 'devHold' : null,
+    devHold === null ? 'devHold' : null,
     insider === null ? 'insider' : null,
     bundler === null ? 'bundler' : null,
     sniperHold === null ? 'sniperHold' : null,
@@ -616,10 +635,11 @@ export function deepScreen({ discovery, audit, nowMs = Date.now() }, config) {
     liquidityValue === null ? 'liquidity' : null,
     ...wallets.unknownFields,
     ...(observation.status === 'WAITING' ? observation.unknownFields : []),
+    ...chartRisk.unknownFields,
     ...(!isSol && honeypot === null && !sellability.pass ? sellability.unknownFields : [])
   ].filter(Boolean);
   return {
-    chainPass, failed, checks, wallets, observation, marketBehavior, sellability, honeypotEvidence,
+    chainPass, failed, checks, wallets, observation, chartRisk, marketBehavior, sellability, honeypotEvidence,
     unknownFields: [...new Set(unknownFields)],
     blockingUnknownFields: [...new Set(blockingUnknownFields)],
     security: {

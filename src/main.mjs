@@ -11,6 +11,8 @@ import { RadarControls } from './local-store.mjs';
 import { LiveDiscovery } from './live-discovery.mjs';
 import { configureWindowsSystemProxy } from './windows-proxy.mjs';
 import { WatchPool } from './watch-pool.mjs';
+import { NansenIntegration } from './nansen.mjs';
+import { createAveSettings } from './ave-settings.mjs';
 
 // Browsers use the Windows system proxy automatically, while Node normally
 // only sees proxy environment variables. Mirror the effective Windows proxy
@@ -35,13 +37,17 @@ if (keyStore.disconnected()) gmgn.resetCredentials({ disabled: true });
 gmgn.nextAllowedAt = Math.max(0, Number(state.value.retryAt) || 0);
 const controls = new RadarControls(config.stateDir, config.supportedChains, state.value.activeChain || config.chain);
 const watchPool = new WatchPool(config.stateDir);
-const scanner = new Scanner({ gmgn, secondary: new SecondaryValidator(), state, controls, watchPool });
+const nansen = new NansenIntegration(config.stateDir);
+let ave;
+try { ave = createAveSettings({ directory: config.stateDir }); }
+catch { console.error('AVE 本机配置无法读取；原文件保留，GMGN 扫描不受影响。'); }
+const scanner = new Scanner({ gmgn, secondary: new SecondaryValidator(), nansen, state, controls, watchPool });
 const connection = new GmgnConnection({ gmgn, keyStore, scanner });
 const liveDiscovery = new LiveDiscovery({ gmgn });
 
 if (once) {
   await scanner.cycle();
-  console.log(JSON.stringify({ ...toPublicStatus(state.value), watchPool: watchPool.snapshot() }, null, 2));
+  console.log(JSON.stringify({ ...toPublicStatus(state.value), watchPool: watchPool.snapshot(), nansen: nansen.snapshot() }, null, 2));
   process.exit(state.value.status === 'ERROR' ? 1 : 0);
 }
 
@@ -49,6 +55,8 @@ const server = createServer({
   state,
   controls,
   watchPool,
+  nansen,
+  ave,
   liveDiscovery,
   enqueueReview: (chain, row) => scanner.enqueueReview(chain, row),
   settings: config,

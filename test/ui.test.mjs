@@ -46,6 +46,70 @@ test('人工复核仅保存本地标记且不包含交易入口', () => {
   assert.match(html, /只扫描、不交易/);
 });
 
+test('AVE 打开代币页且不含邀请码或推荐参数', () => {
+  assert.match(html, /id="ave-api-key"[^>]*type="password"/);
+  assert.match(html, /id="ave-key-form"/);
+  assert.doesNotMatch(html, /share\.ave\.ai|AVE_INVITE_URL|AVE_REFERRAL_CODE|\?ref=|code=0001/);
+  const start = html.indexOf('const AVE_EVM_CHAINS');
+  const end = html.indexOf('function actionLinks', start);
+  assert.ok(start > 0 && end > start);
+  const context = {};
+  vm.runInNewContext(html.slice(start, end) + ';this.tokenUrl = aveTokenUrl;', context);
+  assert.equal(context.tokenUrl('bsc', '0x059ecb64e45b6211f1390d5f28cc909203ca7777'),
+    'https://pro.ave.ai/token/0x059ecb64e45b6211f1390d5f28cc909203ca7777-bsc');
+  assert.equal(context.tokenUrl('sol', 'So11111111111111111111111111111111111111112'),
+    'https://pro.ave.ai/token/So11111111111111111111111111111111111111112-solana');
+  assert.equal(context.tokenUrl('unknown', '0x059ecb64e45b6211f1390d5f28cc909203ca7777'), null);
+  assert.match(html, /t\('aveTrade'\)/);
+  assert.match(html, /gmgnDetails/);
+});
+
+test('语音提醒面板存在且不依赖永久排除表', () => {
+  assert.match(html, /id="voiceEnable"/);
+  assert.match(html, /id="voiceVolume"/);
+  assert.match(html, /src="\/voice-ui\.mjs"/);
+  assert.match(html, /voiceSnapshot/);
+  assert.doesNotMatch(html, /riskExclusions/);
+  const footer = html.slice(html.indexOf('class="footer"'), html.indexOf('id="toast"'));
+  assert.match(footer, /class="voice-panel"/);
+  assert.match(footer, /id="voiceHelp"/);
+  assert.match(footer, /footerLocal/);
+  assert.ok(footer.indexOf('voice-panel') < footer.indexOf('footerLocal'));
+});
+
+test('设置弹窗只有主体滚动且深色沿用页面色板', () => {
+  assert.match(html, /\.settings-dialog\[open\]\s*\{[\s\S]*?display:\s*flex/);
+  assert.match(html, /\.settings-dialog\s*\{[\s\S]*?overflow:\s*hidden/);
+  assert.match(html, /\.settings-dialog\s*\{[\s\S]*?max-width:\s*min\(1120px/);
+  assert.match(html, /\.settings-dialog\s*\{[\s\S]*?color-scheme:\s*dark/);
+  assert.match(html, /\.settings-body\s*\{[\s\S]*?overflow-y:\s*auto/);
+  assert.match(html, /\.settings-body\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(html, /\.settings-card\s*\{[\s\S]*?overflow:\s*visible/);
+  assert.match(html, /\.settings-card\s*\{[\s\S]*?flex:\s*0 0 auto/);
+  assert.match(html, /\.settings-dialog\s*\{[\s\S]*?background:\s*var\(--bg-surface\)/);
+  assert.match(html, /dialog\.settings-dialog \.settings-card\s*\{[\s\S]*?background:\s*#151d26/);
+  assert.match(html, /dialog\.settings-dialog \.settings-card\s*\{[\s\S]*?appearance:\s*none/);
+  assert.match(html, /html\[data-theme="dark"\] \.settings-dialog \.settings-card\s*\{[\s\S]*?background:\s*#151d26 !important/);
+  assert.match(html, /html\[data-theme="dark"\] \.settings-dialog \.settings-card-title[\s\S]*?color:\s*#f1f5f9 !important/);
+  assert.match(html, /:root\[data-theme="dark"\]/);
+  assert.doesNotMatch(html, /<section class="settings-card"/);
+  assert.doesNotMatch(html, /html\[data-theme="dark"\] \.settings-card \{\s*background: #0a0e13/);
+  const titleBlocks = [...html.matchAll(/<h3[^>]*class="settings-card-title"[^>]*>([\s\S]*?)<\/h3>/g)].map(m => m[1]);
+  assert.equal(titleBlocks.length, 4);
+  for (const block of titleBlocks) {
+    assert.match(block, /<svg class="lucide"/);
+    assert.match(block, /<span/);
+  }
+});
+
+test('形态风险展示为复查，旧规则版本不能被人工标成通过', () => {
+  assert.match(html, /code === 'chartRisk'/);
+  assert.match(html, /row\.deep\.chartRisk\.version !== 1/);
+  assert.match(html, /if \(row\.status === 'X_REVIEW' \|\| row\.status === 'QUALIFIED' \|\| row\.deep\.chainPass\) return 'waiting'/);
+  assert.match(html, /id="chartRiskExclusionEnabled"/);
+  assert.doesNotMatch(html, /applyRiskExclusion/);
+});
+
 test('前端X入口拒绝站内功能页并只生成单层用户名链接', () => {
   const start = html.indexOf('const reservedXPaths = new Set(');
   const end = html.indexOf('function officialXHandle', start);

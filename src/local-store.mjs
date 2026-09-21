@@ -48,10 +48,17 @@ export class RadarControls {
   constructor(dir, chains, initialChain) {
     this.file = path.join(dir, 'preferences.json');
     this.chains = chains;
-    const defaults = { enabledChains: [initialChain], annotations: {} };
+    const defaults = { enabledChains: [initialChain], annotations: {}, chartRiskExclusion: false };
     this.value = { ...defaults, ...readJsonWithBackup(this.file, defaults).value };
     this.value.enabledChains = [...new Set(this.value.enabledChains)].filter(x => chains.includes(x)).slice(0, 3);
     if (!this.value.enabledChains.length) this.value.enabledChains = [initialChain];
+    this.value.chartRiskExclusion = this.value.chartRiskExclusion === true;
+  }
+  setChartRiskExclusion(enabled) {
+    if (typeof enabled !== 'boolean') throw Object.assign(new Error('invalid_settings'), { statusCode: 400 });
+    this.value.chartRiskExclusion = enabled;
+    atomicJson(this.file, this.value);
+    return { chartRiskExclusion: this.value.chartRiskExclusion };
   }
   setChains(chains) {
     if (!Array.isArray(chains) || !chains.length || chains.length > 3 || new Set(chains).size !== chains.length || chains.some(x => !this.chains.includes(x))) {

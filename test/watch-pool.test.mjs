@@ -132,3 +132,16 @@ test('pause prevents in-flight audit completion from mutating history and schedu
   assert.equal(pool.record({ chain: 'robinhood', address: address(1), status: 'WAIT_RECHECK' }, 5000), null);
   assert.deepEqual(pool.snapshot()[0], before);
 });
+
+test('optional Nansen evidence persists without raw fields and does not change the primary verdict', t => {
+  const { dir, pool } = fixture(t);
+  pool.add({chain:'robinhood',address:address(1)});
+  pool.record({chain:'robinhood',address:address(1),status:'WAIT_RECHECK',nansen:{source:'NANSEN',status:'OK',checkedAt:1000,
+    apiKey:'never-export',raw:{secret:true},hasMore:true,holders:[{address:address(2),label:'Exchange',valueUsd:null,raw:'secret'}]}});
+  const row = new WatchPool(dir).snapshot()[0];
+  assert.equal(row.latest.nansen.status,'OK');
+  assert.equal(row.history[0].nansen.holders[0].valueUsd,null);
+  assert.equal(row.latest.status,'WAIT_RECHECK');
+  assert.equal(JSON.stringify(row).includes('never-export'),false);
+  assert.equal(JSON.stringify(row).includes('secret'),false);
+});

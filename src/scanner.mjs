@@ -1,10 +1,12 @@
 import { config } from './config.mjs';
+import { CHART_RISK_VERSION, applyRiskExclusion } from './chart-risk.mjs';
 import crypto from 'node:crypto';
 import { discoveryScreen, deepScreen, marketCap, createdAt } from './scoring.mjs';
 import { socialGate } from './social.mjs';
 import { tokenInfoPrice } from './gmgn.mjs';
 import { collectOutcomeSamples, dueOutcomeJobs, outcomeCoverage, sampleRejected } from './outcomes.mjs';
 import { tokenKey } from './local-store.mjs';
+import { nansenEvidence, NANSEN_CACHE_TTL_MS } from './nansen.mjs';
 
 const numberOrNull = value => {
   if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
@@ -56,16 +58,24 @@ function cleanCandidate(row, defaultChain = '') {
   if (clean.status === 'QUALIFIED') clean.status = 'X_REVIEW';
   if (clean.status === 'REJECTED') clean.status = 'HARD_REJECT';
   if (!clean.chain && defaultChain) clean.chain = defaultChain;
+  if (clean.status === 'X_REVIEW' && clean.deep?.chartRisk?.version !== CHART_RISK_VERSION) {
+    clean.status = 'WAIT_RECHECK';
+    clean.deep = { ...clean.deep, chainPass: false };
+    clean.decisionReason = '风险规则已升级，等待重新核验';
+  }
   return clean;
 }
 
 export function reviewRevision(candidate) {
   const security = candidate.deep?.security || {};
+  const chartRisk = candidate.deep?.chartRisk || {};
   return crypto.createHash('sha256').update(JSON.stringify({
     status: candidate.status, checks: candidate.deep?.checks, failed: candidate.deep?.failed,
     owner: security.ownerRenounced, mint: security.renouncedMint, freeze: security.renouncedFreezeAccount,
     honeypot: security.honeypot, buyTax: security.buyTax, sellTax: security.sellTax,
     lock: security.lockRate, burned: security.lpBurned,
+    chartRiskVersion: chartRisk.version || 0, chartRiskPass: chartRisk.pass === true, chartRiskStatus: chartRisk.status || '',
+    chainPass: candidate.deep?.chainPass === true && chartRisk.version === CHART_RISK_VERSION,
     secondary: candidate.secondary?.security?.verdict, conflicts: candidate.secondary?.conflicts,
     website: candidate.info?.website, twitter: candidate.info?.twitter
   })).digest('hex').slice(0, 24);
@@ -112,7 +122,7 @@ function socialFrom(token) {
   };
 }
 
-export function classifyDeepResult(deep, auditMeta = {}) {
+export function classifyDeepResult(deep, auditMeta = {}, options = {}) {
   const failed = new Set(deep?.failed || []);
   const unknown = new Set(deep?.blockingUnknownFields || deep?.unknownFields || []);
   const unknownCheck = name => {
@@ -121,11 +131,12 @@ export function classifyDeepResult(deep, auditMeta = {}) {
       lpLocked: ['lockRate'], notHoneypot: ['honeypot', 'sellability.'], tax: ['buyTax', 'sellTax'],
       rug: ['rugRatio'], concentration: ['top10'], dev: ['devHold'], insider: ['insider'],
       bundler: ['bundler'], sniper: ['sniperHold'], wash: ['wash'], liquidity: ['liquidity'],
-      wallets: ['holders.'], observation: ['candles']
+      wallets: ['holders.'], observation: ['candles'], chartRisk: ['chartRisk.']
     }[name] || [];
     return [...unknown].some(field => prefixes.some(prefix => field === prefix || field.startsWith(prefix)));
   };
-  const transient = new Set(['wallets', 'observation', 'marketBehavior']);
+  const transient = new Set(['wallets', 'observation', 'marketBehavior', 'chartRisk']);
+  if (options.chartRiskExclusion === true && deep?.chartRisk?.status === 'REJECT') transient.delete('chartRisk');
   if (deep?.honeypotEvidence !== '检测到貔貅') transient.add('notHoneypot');
   const hardFailed = [...failed].filter(name => !transient.has(name) && !unknownCheck(name));
   const waitingFailed = [...failed].filter(name => transient.has(name) || unknownCheck(name));
@@ -338,9 +349,10 @@ function addEvent(events, type, message, chain, data = {}) {
 }
 
 export class Scanner {
-  constructor({ gmgn, secondary = null, state, controls = null, watchPool = null, settings = config }) {
+  constructor({ gmgn, secondary = null, nansen = null, state, controls = null, watchPool = null, settings = config }) {
     this.gmgn = gmgn;
     this.secondary = secondary;
+    this.nansen = nansen;
     this.state = state;
     this.controls = controls;
     this.watchPool = watchPool;
@@ -412,6 +424,10 @@ export class Scanner {
   }
 
   enqueueReview(chain, row) {
+    if (this.controls?.value.chartRiskExclusion === true && row?.address
+      && this.state.value.riskExclusions?.[tokenKey(chain, row.address)]) {
+      return { accepted: false, reason: 'risk_excluded' };
+    }
     const enabled = this.controls?.value.enabledChains || [this.activeChain];
     if (!enabled.includes(chain)) return { accepted: false, reason: 'chain_not_scanning' };
     if (!row || !discoveryScreen(row, { ...this.config, chain }).pass) return { accepted: false, reason: 'outside_audit_scope' };
@@ -439,6 +455,8 @@ export class Scanner {
     const keyEpoch = this.gmgn.keyEpoch;
     const startedAt = Date.now();
     const prior = structuredClone(this.state.value);
+    const exclusionOn = this.controls?.value.chartRiskExclusion === true;
+    const riskExclusions = prior.riskExclusions || (prior.riskExclusions = {});
     this.state.value.status = 'SCANNING';
     this.state.value.scanInProgress = true;
     this.state.value.cycleStartedAt = startedAt;
@@ -478,7 +496,12 @@ export class Scanner {
       // Current discovery wins over a queued preview snapshot when both exist.
       discovered = [...new Map([...reviewRequests.map(item => item.row), ...discovered].map(row => [addressKey(row.address), row])).values()];
       const discoveredByAddress = new Map(discovered.filter(row => row?.address).map(row => [addressKey(row.address), row]));
-      const screened = discovered.map(row => ({ row, screen: discoveryScreen(row, settings) }));
+      const screened = discovered.map(row => {
+        const screen = discoveryScreen(row, settings);
+        const held = exclusionOn ? riskExclusions[tokenKey(chain, row.address)] : null;
+        if (held) { screen.pass = false; screen.reasons.push(...(held.reasons || [])); }
+        return { row, screen };
+      });
       this.watchPool?.capture(chain, screened, startedAt);
       const prequalified = screened.filter(item => item.screen.pass).sort((a, b) =>
         Number(b.screen.priorityBand) - Number(a.screen.priorityBand) || b.screen.score - a.screen.score
@@ -498,7 +521,8 @@ export class Scanner {
           screen: { mc: 0, liquidity: 0, ageSec: 0, priorityBand: false, score: 0 } }));
       const pausedWatch = new Set((this.watchPool?.snapshot(chain) || []).filter(row => row.paused).map(row => addressKey(row.address)));
       const auditable = [...prequalified, ...monitors.filter(item => !watchOnly.some(row => addressKey(row.row.address) === addressKey(item.row.address))), ...watchOnly]
-        .filter(item => !pausedWatch.has(addressKey(item.row.address)));
+        .filter(item => !pausedWatch.has(addressKey(item.row.address))
+          && !(exclusionOn && riskExclusions[tokenKey(chain, item.row.address)]));
       let auditQueue = buildQueue(prior.auditQueue, auditable, startedAt, settings);
       const availableAddresses = new Set(auditable.map(item => addressKey(item.row.address)));
       const queueByAddress = new Map(auditQueue.map(item => [addressKey(item.address), item]));
@@ -523,7 +547,21 @@ export class Scanner {
         selected.unshift(watchSlot);
         selected.splice(settings.maxDeepAuditsPerCycle);
       }
-      const candidatesByAddress = new Map((prior.candidates || []).map(row => cleanCandidate(row, chain)).filter(Boolean).map(row => [addressKey(row.address), row]));
+      const candidatesByAddress = new Map((prior.candidates || []).map(row => cleanCandidate(row, chain)).filter(Boolean)
+        .map(row => [addressKey(row.address), exclusionOn ? applyRiskExclusion(row, riskExclusions, chain) : row]));
+      for (const { row, screen } of screened) {
+        const previous = candidatesByAddress.get(addressKey(row.address));
+        if (!screen.pass && previous?.status === 'X_REVIEW') {
+          // 发现较新不利事实时，不得等待深审位而任由旧通过快照继续生效
+          candidatesByAddress.set(addressKey(row.address), {
+            ...previous,
+            status: 'WAIT_RECHECK',
+            deep: { ...previous.deep, chainPass: false },
+            decisionReason: screen.reasons.join('；'),
+            reviewRevision: `invalidated-${startedAt}`
+          });
+        }
+      }
       let outcomes = updateOutcomeTracking(
         prior.outcomes,
         discoveredByAddress,
@@ -536,6 +574,7 @@ export class Scanner {
       let lastSecondaryHealth = prior.sourceHealth?.lastSecondary || null;
       let auditHadError = Boolean(discoveryError);
       let auditsCompleted = 0;
+      let nansenUsedThisCycle = false;
 
       for (const queued of selected) {
         if (auditsCompleted && Date.now() - startedAt >= (settings.auditCycleBudgetMs || 80_000)) break;
@@ -548,7 +587,7 @@ export class Scanner {
         try {
           const audit = await this.gmgn.audit(token.address, Math.floor(Date.now() / 1000), chain, {
             deadline: startedAt + settings.auditCycleBudgetMs,
-            shouldStopEarly: partial => classifyDeepResult(deepScreen({ discovery: item.row, audit: partial }, settings), partial._meta).status === 'HARD_REJECT'
+            shouldStopEarly: partial => classifyDeepResult(deepScreen({ discovery: item.row, audit: partial }, settings), partial._meta, { chartRiskExclusion: exclusionOn }).status === 'HARD_REJECT'
           });
           if (this.gmgn.keyEpoch !== keyEpoch) return;
           const freshPrice = tokenInfoPrice(audit.info);
@@ -563,7 +602,16 @@ export class Scanner {
             token.symbol = visibleToken.symbol = String(audit.info?.symbol || token.symbol).slice(0, 30);
           }
           const deep = deepScreen({ discovery: item.row, audit }, settings);
-          const baseClassification = classifyDeepResult(deep, audit._meta || {});
+          if (exclusionOn && deep.chartRisk?.status === 'REJECT') {
+            riskExclusions[tokenKey(chain, token.address)] = {
+              chain, address: token.address, at: Date.now(), version: CHART_RISK_VERSION,
+              codes: deep.chartRisk.codes, reasons: deep.chartRisk.reasons,
+              from: deep.chartRisk.from, to: deep.chartRisk.to
+            };
+            this.state.value.riskExclusions = riskExclusions;
+            this.state.save();
+          }
+          const baseClassification = classifyDeepResult(deep, audit._meta || {}, { chartRiskExclusion: exclusionOn });
           const primaryWebsite = String(first(audit.info?.link?.website, item.row.website, item.row.link?.website) || '');
           let secondary = null;
           if (this.secondary && baseClassification.status !== 'HARD_REJECT') {
@@ -608,6 +656,31 @@ export class Scanner {
           }
           const social = socialFrom(token);
           const auditedAt = Date.now();
+          const previousCandidate = candidatesByAddress.get(addressKey(token.address));
+          const watchLatest = this.watchPool?.snapshot(chain)
+            .find(row => addressKey(row.address) === addressKey(token.address))?.latest?.nansen;
+          const priorNansen = nansenEvidence(previousCandidate?.nansen) || nansenEvidence(watchLatest);
+          const nansenAgeMs = startedAt - num(priorNansen?.checkedAt);
+          const freshNansen = priorNansen && ['OK', 'EMPTY'].includes(priorNansen.status)
+            && num(priorNansen.checkedAt) > 0 && nansenAgeMs >= 0 && nansenAgeMs < NANSEN_CACHE_TTL_MS;
+          let nansen = freshNansen ? priorNansen : null;
+          const isRecheck = num(queued.lastAuditedAt) > 0
+            || watchDue.some(row => addressKey(row.address) === addressKey(token.address));
+          if (isRecheck && this.nansen?.snapshot().enabled && !freshNansen
+            && !nansenUsedThisCycle && this.nansen.canReview?.() !== false) {
+            nansenUsedThisCycle = true;
+            try {
+              const next = await this.nansen.review({ chain, address: token.address,
+                deadline: startedAt + settings.auditCycleBudgetMs });
+              nansen = next?.status === 'TIME_BUDGET' && priorNansen ? priorNansen : next;
+            } catch {
+              // 可选来源故障不改变原筛选结果，也不持久化上游异常文本。
+              nansen = { source: 'NANSEN', status: 'ERROR', errorCode: 'NETWORK_ERROR', checkedAt: Date.now() };
+            }
+            if (this.gmgn.keyEpoch !== keyEpoch) return;
+          } else if (isRecheck && !nansen) {
+            nansen = priorNansen;
+          }
           const secondaryWebsite = secondary?.market?.websites?.[0] || '';
           const marketBehaviorReason = deep.marketBehavior?.downgradeReasons?.join('；') || '';
           const candidate = {
@@ -618,14 +691,14 @@ export class Scanner {
             deep,
             social,
             secondary,
-            decisionReason: [classification.secondaryReason, marketBehaviorReason].filter(Boolean).join('；'),
+            nansen,
+            decisionReason: [...(deep.chartRisk?.reasons || []), classification.secondaryReason, marketBehaviorReason].filter(Boolean).join('；'),
             auditHealth: audit._meta || { complete: true, endpoints: {} },
             info: {
               twitter: social.twitter,
               website: String(first(primaryWebsite, secondaryWebsite) || '')
             }
           };
-          const previousCandidate = candidatesByAddress.get(addressKey(token.address));
           candidate.reviewEvidence = reviewRevision(candidate);
           candidate.reviewRevision = previousCandidate?.reviewEvidence === candidate.reviewEvidence
             ? previousCandidate.reviewRevision : `${candidate.reviewEvidence}-${auditedAt}`;
