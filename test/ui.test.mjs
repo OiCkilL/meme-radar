@@ -107,6 +107,8 @@ test('形态风险展示为复查，旧规则版本不能被人工标成通过',
   assert.match(html, /row\.deep\.chartRisk\.version !== 1/);
   assert.match(html, /if \(row\.status === 'X_REVIEW' \|\| row\.status === 'QUALIFIED' \|\| row\.deep\.chainPass\) return 'waiting'/);
   assert.match(html, /id="chartRiskExclusionEnabled"/);
+  assert.match(html, /id="throughputEnabled"/);
+  assert.match(html, /启用提速调度/);
   assert.doesNotMatch(html, /applyRiskExclusion/);
 });
 

@@ -2790,6 +2790,8 @@
         <div id="scanSelection" class="scan-chains-grid"></div>
         <label class="manage-actions"><input id="chartRiskExclusionEnabled" type="checkbox"> 形态命中后永久排除，不再复查</label>
         <p class="muted">默认关闭：K 线形态命中只当次待复查，观察池仍会继续盯。打开后按链＋合约写入排除表，重启也不自动取消；关闭开关只停止使用该表，不清空已记录项。</p>
+        <label class="manage-actions"><input id="throughputEnabled" type="checkbox"> 启用提速调度（轻采样与逐币发布）</label>
+        <p class="muted">默认关闭，走原来的整轮深审路径。打开后用公平排队、info 轻采样和逐币发布；轻采样只更新行情，不是完整安全审核，也不能洗白已锁存风险。下一轮扫描生效，保存在本机。</p>
         <div class="manage-actions">
           <button id="saveChains" class="mini-button" type="button" data-i18n="saveChains">保存扫描链</button>
           <button id="notificationButton" class="mini-button" type="button" data-i18n="enableAlerts">开启桌面提醒</button>
@@ -3529,6 +3531,7 @@
           + '</div></label>';
       }).join('');
       byId('chartRiskExclusionEnabled').checked = data.chartRiskExclusion === true;
+      byId('throughputEnabled').checked = data.throughputEnabled === true;
       byId('schedulerDetail').textContent = t('schedulerSummary', { chains: enabled.join(' / '), current: scheduler.scanningChain || activeChain(data) });
       byId('notificationButton').textContent = t(alertsEnabled ? 'muteAlerts' : 'enableAlerts');
       byId('savedNotes').innerHTML = Object.values(data.annotations || {}).map(function (row) {
@@ -4821,6 +4824,17 @@
       try {
         await postLocal('/api/preferences', { chartRiskExclusion: enabled });
         if (lastData) lastData.chartRiskExclusion = enabled;
+        showToast(t('settingsSaved'));
+      } catch {
+        event.target.checked = !enabled;
+        showToast(t('settingsFailed'));
+      }
+    });
+    byId('throughputEnabled').addEventListener('change', async function (event) {
+      const enabled = event.target.checked === true;
+      try {
+        await postLocal('/api/preferences', { throughputEnabled: enabled });
+        if (lastData) lastData.throughputEnabled = enabled;
         showToast(t('settingsSaved'));
       } catch {
         event.target.checked = !enabled;

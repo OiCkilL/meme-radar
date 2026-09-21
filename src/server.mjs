@@ -509,6 +509,7 @@ export function toPublicStatus(source = {}) {
       ? source.supportedChains.slice(0, CHAIN_IDS.size).map(value => text(value, 32)).filter(value => CHAIN_IDS.has(value))
       : [],
     chartRiskExclusion: source.chartRiskExclusion === true,
+    throughputEnabled: source.throughputEnabled === true,
     candidates: Array.isArray(source.candidates) ? source.candidates.slice(0, 100)
       .map(row => publicCandidate(source.chartRiskExclusion === true
         ? applyRiskExclusion(row, source.riskExclusions || {}, activeChain) : row)) : [],
@@ -812,10 +813,17 @@ export function createServer({ state, settings, controls, switchChain, saveGmgnK
           return sendJson(res, 200, controls.setChains(body.chains), csp);
         }
         if (url.pathname === '/api/preferences') {
-          if (Object.keys(body).length !== 1 || typeof body.chartRiskExclusion !== 'boolean') {
+          const keys = Object.keys(body);
+          if (keys.length !== 1 || typeof body[keys[0]] !== 'boolean') {
             return sendJson(res, 400, { error: 'invalid_settings' }, csp);
           }
-          return sendJson(res, 200, controls.setChartRiskExclusion(body.chartRiskExclusion), csp);
+          if (keys[0] === 'chartRiskExclusion') {
+            return sendJson(res, 200, controls.setChartRiskExclusion(body.chartRiskExclusion), csp);
+          }
+          if (keys[0] === 'throughputEnabled') {
+            return sendJson(res, 200, controls.setThroughputEnabled(body.throughputEnabled), csp);
+          }
+          return sendJson(res, 400, { error: 'invalid_settings' }, csp);
         }
         if (Object.keys(body).sort().join(',') !== 'address,chain,favorite,note') return sendJson(res, 400, { error: 'invalid_settings' }, csp);
         return sendJson(res, 200, controls.annotate(body), csp);
@@ -927,8 +935,10 @@ export function createServer({ state, settings, controls, switchChain, saveGmgnK
           supportedChains: state.value.supportedChains, events: state.value.events,
           policy: { ...state.value.policy, chain }, scanInProgress: false,
           chartRiskExclusion: controls?.value.chartRiskExclusion === true,
+          throughputEnabled: controls?.value.throughputEnabled === true,
           riskExclusions: state.value.riskExclusions }
-        : { ...state.value, chartRiskExclusion: controls?.value.chartRiskExclusion === true };
+        : { ...state.value, chartRiskExclusion: controls?.value.chartRiskExclusion === true,
+          throughputEnabled: controls?.value.throughputEnabled === true };
       const annotations = Object.fromEntries(Object.entries(controls?.value.annotations || {}).slice(0, 500).map(([key, value]) => [key, {
         chain: text(value.chain, 32), address: text(value.address, 128), favorite: value.favorite === true,
         note: publicMessage(value.note, '[redacted]', 500), updatedAt: finite(value.updatedAt)
@@ -952,6 +962,7 @@ export function createServer({ state, settings, controls, switchChain, saveGmgnK
           ...toPublicStatus({
             ...scope, activeChain: id,
             chartRiskExclusion: controls?.value.chartRiskExclusion === true,
+            throughputEnabled: controls?.value.throughputEnabled === true,
             riskExclusions: state.value.riskExclusions
           }),
           outcomes: (scope.outcomes || []).slice(0, 1000).map(row => ({

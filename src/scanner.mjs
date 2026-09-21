@@ -382,9 +382,7 @@ export class Scanner {
         outcomeReadsPerCycle: settings.outcomeReadsPerCycle,
         enabledChains: controls?.value.enabledChains?.length || 1
       }),
-      file: settings.throughputEnabled && settings.stateDir
-        ? path.join(settings.stateDir, 'request-budget.json')
-        : null
+      file: settings.stateDir ? path.join(settings.stateDir, 'request-budget.json') : null
     });
     this.supplements = supplements || new SupplementQueue({
       nansen,
@@ -576,7 +574,9 @@ export class Scanner {
         selected.splice(settings.maxDeepAuditsPerCycle);
       }
 
-      const throughputOn = settings.throughputEnabled === true;
+      const throughputOn = this.controls
+        ? this.controls.value.throughputEnabled === true
+        : settings.throughputEnabled === true;
       if (this.state) this.state.gmgnKeyEpoch = keyEpoch;
       let throughputTasks = [];
       if (throughputOn) {

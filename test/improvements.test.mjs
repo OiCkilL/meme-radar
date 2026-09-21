@@ -104,8 +104,11 @@ test('favorites and notes persist with exact Solana keys, bounded input and safe
   assert.equal(Object.keys(controls.value.annotations).length,2);
   controls.setChains(['sol','bsc','base']);
   assert.equal(controls.value.chartRiskExclusion, false);
+  assert.equal(controls.value.throughputEnabled, false);
   assert.deepEqual(controls.setChartRiskExclusion(true), { chartRiskExclusion: true });
+  assert.deepEqual(controls.setThroughputEnabled(true), { throughputEnabled: true });
   assert.equal(new RadarControls(dir,config.supportedChains,'robinhood').value.chartRiskExclusion, true);
+  assert.equal(new RadarControls(dir,config.supportedChains,'robinhood').value.throughputEnabled, true);
   assert.deepEqual(new RadarControls(dir,config.supportedChains,'robinhood').value.enabledChains,['sol','bsc','base']);
   assert.throws(() => controls.setChains(['sol','bsc','eth','base']));
   assert.throws(() => controls.annotate({chain:'bsc',address:'../../x',favorite:true,note:'x'}));
@@ -183,6 +186,9 @@ test('settings endpoints validate origin/schema; view/export exposes whitelisted
   assert.equal((await dispatch(server,'POST','/api/preferences',{chartRiskExclusion:true,extra:1})).status,400);
   assert.equal((await dispatch(server,'POST','/api/preferences',{chartRiskExclusion:true})).status,200);
   assert.equal((await dispatch(server,'GET','/api/status')).body.chartRiskExclusion, true);
+  assert.equal((await dispatch(server,'POST','/api/preferences',{throughputEnabled:true})).status,200);
+  assert.equal((await dispatch(server,'GET','/api/status')).body.throughputEnabled, true);
+  assert.equal((await dispatch(server,'POST','/api/preferences',{throughputEnabled:'yes'})).status,400);
   assert.equal((await dispatch(server,'POST','/api/gmgn-disconnect',{},false)).status,403);
   assert.equal((await dispatch(server,'POST','/api/gmgn-disconnect',{})).body.disconnected,true);
   const status=await dispatch(server,'GET','/api/status?chain=sol');
