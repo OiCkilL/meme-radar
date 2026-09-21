@@ -7,7 +7,15 @@ import { tokenInfoPrice } from './gmgn.mjs';
 import { collectOutcomeSamples, dueOutcomeJobs, outcomeCoverage, sampleRejected } from './outcomes.mjs';
 import { tokenKey } from './local-store.mjs';
 import { nansenEvidence, NANSEN_CACHE_TTL_MS } from './nansen.mjs';
-
+import { RequestBudget, auditEnvelope, DEEP_RESERVE, OBSERVE_RESERVE } from './request-budget.mjs';
+import {
+  classifyLane,
+  classifyModeEligibility,
+  selectFairTasks,
+  advanceModeCursor
+} from './audit-scheduler.mjs';
+import { SupplementQueue } from './supplement-queue.mjs';
+import path from 'node:path';
 const numberOrNull = value => {
   if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
   const parsed = Number(value);
@@ -349,7 +357,7 @@ function addEvent(events, type, message, chain, data = {}) {
 }
 
 export class Scanner {
-  constructor({ gmgn, secondary = null, nansen = null, state, controls = null, watchPool = null, settings = config }) {
+  constructor({ gmgn, secondary = null, nansen = null, state, controls = null, watchPool = null, settings = config, supplements = null, budget = null }) {
     this.gmgn = gmgn;
     this.secondary = secondary;
     this.nansen = nansen;
@@ -365,8 +373,28 @@ export class Scanner {
     this.rescanRequested = false;
     this.stopped = false;
     this.requestedReviews = new Map();
+    this.schedulerCursor = { lane: 0, mode: {} };
+    this.budget = budget || new RequestBudget({
+      windowMs: settings.scanIntervalMs,
+      limits: auditEnvelope({
+        scanIntervalMs: settings.scanIntervalMs,
+        maxDeepAuditsPerCycle: settings.maxDeepAuditsPerCycle,
+        outcomeReadsPerCycle: settings.outcomeReadsPerCycle,
+        enabledChains: controls?.value.enabledChains?.length || 1
+      }),
+      file: settings.throughputEnabled && settings.stateDir
+        ? path.join(settings.stateDir, 'request-budget.json')
+        : null
+    });
+    this.supplements = supplements || new SupplementQueue({
+      nansen,
+      watchPool,
+      state,
+      windowMs: settings.scanIntervalMs
+    });
     this.state.value.activeChain = this.activeChain;
     this.state.value.supportedChains = this.supportedChains;
+    if (this.state) this.state.gmgnKeyEpoch = this.gmgn?.keyEpoch || 0;
   }
 
   activateChain(chain, quiet = false) {
@@ -547,6 +575,87 @@ export class Scanner {
         selected.unshift(watchSlot);
         selected.splice(settings.maxDeepAuditsPerCycle);
       }
+
+      const throughputOn = settings.throughputEnabled === true;
+      if (this.state) this.state.gmgnKeyEpoch = keyEpoch;
+      let throughputTasks = [];
+      if (throughputOn) {
+        const favorites = this.controls?.value.annotations || {};
+        const watchRows = this.watchPool?.snapshot(chain) || [];
+        const taskMap = new Map();
+        for (const row of watchRows) {
+          const eligibility = classifyModeEligibility({
+            ...row,
+            status: row.latest?.status,
+            favorite: favorites[tokenKey(chain, row.address)]?.favorite === true,
+            hardFailed: row.latest?.reasons || [],
+            delisted: row.delisted === true
+          });
+          const lane = classifyLane({
+            ...row,
+            favorite: favorites[tokenKey(chain, row.address)]?.favorite === true,
+            status: row.latest?.status
+          });
+          taskMap.set(addressKey(row.address), {
+            chain,
+            address: row.address,
+            key: tokenKey(chain, row.address),
+            lane,
+            dueAt: Math.min(num(row.nextCheckAt, Infinity), num(row.nextObservationAt, Infinity)),
+            deepDueAt: num(row.nextCheckAt, Infinity),
+            observeDueAt: num(row.nextObservationAt, Infinity),
+            firstSeenAt: num(row.firstSeenAt),
+            forcedDeep: eligibility.forcedDeep,
+            allowObserve: eligibility.allowObserve,
+            modeCursor: row.modeCursor || (eligibility.forcedDeep ? 'DEEP' : 'OBSERVE'),
+            paused: row.paused === true
+          });
+        }
+        for (const item of auditQueue) {
+          if (!availableAddresses.has(addressKey(item.address))) continue;
+          const key = addressKey(item.address);
+          const existing = taskMap.get(key);
+          const favorite = favorites[tokenKey(chain, item.address)]?.favorite === true;
+          const eligibility = classifyModeEligibility({
+            source: existing?.lane === 'MANUAL' ? 'manual' : 'discovery',
+            status: item.status,
+            checkCount: num(item.lastAuditedAt) > 0 ? 1 : 0,
+            favorite,
+            hardFailed: []
+          });
+          taskMap.set(key, {
+            chain,
+            address: item.address,
+            key: tokenKey(chain, item.address),
+            lane: classifyLane({
+              source: existing?.lane === 'MANUAL' ? 'manual' : 'discovery',
+              favorite,
+              status: item.status,
+              checkCount: num(item.lastAuditedAt) > 0 ? 1 : 0,
+              riskLatched: existing?.lane === 'RISK'
+            }),
+            dueAt: Math.min(num(item.nextAuditAt, Infinity), num(existing?.observeDueAt, Infinity)),
+            deepDueAt: num(item.nextAuditAt, Infinity),
+            observeDueAt: existing?.observeDueAt ?? num(item.nextAuditAt, Infinity),
+            firstSeenAt: num(item.firstSeenAt, existing?.firstSeenAt),
+            forcedDeep: eligibility.forcedDeep || existing?.forcedDeep,
+            allowObserve: eligibility.allowObserve,
+            modeCursor: existing?.modeCursor || (eligibility.forcedDeep ? 'DEEP' : 'OBSERVE'),
+            paused: pausedWatch.has(key)
+          });
+        }
+        const deepProtect = Math.min(2, settings.maxDeepAuditsPerCycle);
+        const { selected: fairSelected, cursor } = selectFairTasks([...taskMap.values()], {
+          now: startedAt,
+          limit: settings.maxDeepAuditsPerCycle * 6,
+          deepProtect,
+          deepBudgetLeft: settings.maxDeepAuditsPerCycle,
+          observeBudgetLeft: settings.maxDeepAuditsPerCycle * 6,
+          cursor: this.schedulerCursor
+        });
+        this.schedulerCursor = cursor;
+        throughputTasks = fairSelected;
+      }
       const candidatesByAddress = new Map((prior.candidates || []).map(row => cleanCandidate(row, chain)).filter(Boolean)
         .map(row => [addressKey(row.address), exclusionOn ? applyRiskExclusion(row, riskExclusions, chain) : row]));
       for (const { row, screen } of screened) {
@@ -574,9 +683,90 @@ export class Scanner {
       let lastSecondaryHealth = prior.sourceHealth?.lastSecondary || null;
       let auditHadError = Boolean(discoveryError);
       let auditsCompleted = 0;
+      let observationsCompleted = 0;
       let nansenUsedThisCycle = false;
+      let deepComplete = 0;
+      let firstPublishedAt = null;
 
-      for (const queued of selected) {
+      if (throughputOn) {
+        for (const task of throughputTasks) {
+          if (Date.now() - startedAt >= (settings.auditCycleBudgetMs || 80_000)) break;
+          if (this.gmgn.nextAllowedAt > Date.now() || this.gmgn.disabled) break;
+          if (task.mode === 'OBSERVE') {
+            let ticket = null;
+            try {
+              if (!this.budget.canReserve('AUDIT', OBSERVE_RESERVE)) {
+                this.state.value.throughput = {
+                  ...(this.state.value.throughput || {}),
+                  budgetSkipped: num(this.state.value.throughput?.budgetSkipped) + 1
+                };
+                continue;
+              }
+              ticket = this.budget.reserve('AUDIT', OBSERVE_RESERVE);
+              const observation = await this.gmgn.observe(task.address, chain, {
+                deadline: startedAt + settings.auditCycleBudgetMs,
+                budgetTicket: ticket,
+                budget: this.budget
+              });
+              if (this.gmgn.keyEpoch !== keyEpoch) { this.budget.release(ticket); return; }
+              this.watchPool?.recordObservation({
+                chain,
+                address: task.address,
+                observation,
+                nextObservationAt: Date.now() + settings.dynamicRecheckMs
+              });
+              const entry = this.watchPool?.entries?.get(tokenKey(chain, task.address));
+              if (entry) entry.modeCursor = advanceModeCursor(entry.modeCursor, 'OBSERVE');
+              this.watchPool?.save?.();
+              observationsCompleted += 1;
+            } catch (error) {
+              this.watchPool?.recordObservationFailure({
+                chain,
+                address: task.address,
+                error: error?.code || 'OBSERVE_FAILED',
+                at: Date.now(),
+                nextObservationAt: Date.now() + settings.dynamicRecheckMs
+              });
+              if (error?.code === 'GMGN_RATE_LIMITED') { this.budget.release(ticket); break; }
+            } finally {
+              if (ticket) this.budget.release(ticket);
+            }
+            continue;
+          }
+
+          // DEEP path under throughput uses the shared processing below via synthetic queue item.
+          if (!selected.some(item => addressKey(item.address) === addressKey(task.address))) {
+            selected.push({
+              address: task.address,
+              firstSeenAt: task.firstSeenAt,
+              lastSeenAt: startedAt,
+              lastAuditedAt: 0,
+              nextAuditAt: 0,
+              attempts: 0,
+              status: 'QUEUED',
+              priorityBand: false,
+              score: 0,
+              watched: true,
+              _throughputDeep: true
+            });
+            if (!queueByAddress.has(addressKey(task.address))) {
+              queueByAddress.set(addressKey(task.address), selected[selected.length - 1]);
+            }
+            if (!auditable.some(entry => addressKey(entry.row.address) === addressKey(task.address))) {
+              auditable.push({
+                row: { address: task.address, symbol: '?', _monitorOnly: true },
+                screen: { mc: 0, liquidity: 0, ageSec: 0, priorityBand: false, score: 0 }
+              });
+            }
+          }
+        }
+      }
+
+      const deepWork = throughputOn
+        ? selected.filter(item => throughputTasks.some(task => task.mode === 'DEEP' && addressKey(task.address) === addressKey(item.address)))
+        : selected;
+
+      for (const queued of deepWork) {
         if (auditsCompleted && Date.now() - startedAt >= (settings.auditCycleBudgetMs || 80_000)) break;
         if (this.gmgn.nextAllowedAt > Date.now() || this.gmgn.disabled) break;
         if (this.watchPool?.snapshot(chain).some(row => row.paused && addressKey(row.address) === addressKey(queued.address))) continue;
@@ -584,9 +774,22 @@ export class Scanner {
         if (!item) continue;
         const token = publicToken(item.row, item.screen, chain);
         const visibleToken = cleanCandidate(token);
+        let deepTicket = null;
         try {
+          if (throughputOn) {
+            if (!this.budget.canReserve('AUDIT', DEEP_RESERVE)) {
+              this.state.value.throughput = {
+                ...(this.state.value.throughput || {}),
+                budgetSkipped: num(this.state.value.throughput?.budgetSkipped) + 1
+              };
+              continue;
+            }
+            deepTicket = this.budget.reserve('AUDIT', DEEP_RESERVE);
+          }
           const audit = await this.gmgn.audit(token.address, Math.floor(Date.now() / 1000), chain, {
             deadline: startedAt + settings.auditCycleBudgetMs,
+            budgetTicket: deepTicket,
+            budget: throughputOn ? this.budget : null,
             shouldStopEarly: partial => classifyDeepResult(deepScreen({ discovery: item.row, audit: partial }, settings), partial._meta, { chartRiskExclusion: exclusionOn }).status === 'HARD_REJECT'
           });
           if (this.gmgn.keyEpoch !== keyEpoch) return;
@@ -631,7 +834,8 @@ export class Scanner {
                     openSource: deep.security?.openSource,
                     mintable: typeof deep.security?.renouncedMint === 'boolean' ? !deep.security.renouncedMint : undefined
                   }
-                }
+                },
+                deadline: startedAt + settings.auditCycleBudgetMs
               });
             } catch {
               secondary = {
@@ -656,6 +860,7 @@ export class Scanner {
           }
           const social = socialFrom(token);
           const auditedAt = Date.now();
+          const reviewId = crypto.randomBytes(8).toString('hex');
           const previousCandidate = candidatesByAddress.get(addressKey(token.address));
           const watchLatest = this.watchPool?.snapshot(chain)
             .find(row => addressKey(row.address) === addressKey(token.address))?.latest?.nansen;
@@ -666,8 +871,9 @@ export class Scanner {
           let nansen = freshNansen ? priorNansen : null;
           const isRecheck = num(queued.lastAuditedAt) > 0
             || watchDue.some(row => addressKey(row.address) === addressKey(token.address));
-          if (isRecheck && this.nansen?.snapshot().enabled && !freshNansen
-            && !nansenUsedThisCycle && this.nansen.canReview?.() !== false) {
+          const shouldNansen = isRecheck && this.nansen?.snapshot().enabled && !freshNansen
+            && !nansenUsedThisCycle && this.nansen.canReview?.() !== false;
+          if (shouldNansen && !throughputOn) {
             nansenUsedThisCycle = true;
             try {
               const next = await this.nansen.review({ chain, address: token.address,
@@ -678,6 +884,8 @@ export class Scanner {
               nansen = { source: 'NANSEN', status: 'ERROR', errorCode: 'NETWORK_ERROR', checkedAt: Date.now() };
             }
             if (this.gmgn.keyEpoch !== keyEpoch) return;
+          } else if (isRecheck && !nansen && !throughputOn) {
+            nansen = priorNansen;
           } else if (isRecheck && !nansen) {
             nansen = priorNansen;
           }
@@ -692,6 +900,7 @@ export class Scanner {
             social,
             secondary,
             nansen,
+            reviewId,
             decisionReason: [...(deep.chartRisk?.reasons || []), classification.secondaryReason, marketBehaviorReason].filter(Boolean).join('；'),
             auditHealth: audit._meta || { complete: true, endpoints: {} },
             info: {
@@ -704,10 +913,34 @@ export class Scanner {
             ? previousCandidate.reviewRevision : `${candidate.reviewEvidence}-${auditedAt}`;
           candidatesByAddress.set(addressKey(token.address), candidate);
           const freshSupply = numberOrNull(audit.info?.circulating_supply);
-          this.watchPool?.record({ ...candidate, price: freshPrice,
+          const watchPayload = { ...candidate, price: freshPrice,
             marketCap: numberOrNull(audit.info?.market_cap) ?? (freshPrice && freshSupply > 0 ? freshPrice * freshSupply : null),
-            liquidity: numberOrNull(first(audit.pool?.liquidity, audit.info?.liquidity)) }, auditedAt);
+            liquidity: numberOrNull(first(audit.pool?.liquidity, audit.info?.liquidity)) };
+          const recorded = this.watchPool?.record(watchPayload, auditedAt);
+          if (throughputOn) {
+            this.state?.commitCandidate?.({
+              chain, address: token.address, reviewId, keyEpoch, candidate
+            });
+            if (!firstPublishedAt) firstPublishedAt = auditedAt;
+            const entry = this.watchPool?.entries?.get(tokenKey(chain, token.address));
+            if (entry) entry.modeCursor = advanceModeCursor(entry.modeCursor, 'DEEP');
+            this.watchPool?.save?.();
+            if (shouldNansen) {
+              nansenUsedThisCycle = true;
+              this.supplements?.enqueue({
+                chain,
+                address: token.address,
+                reviewId,
+                keyEpoch,
+                manual: entry?.source === 'manual' || this.controls?.value.annotations[tokenKey(chain, token.address)]?.favorite === true,
+                nansenConfigRevision: this.nansen?.revision || 0,
+                deadline: startedAt + settings.auditCycleBudgetMs
+              });
+            }
+          }
+          void recorded;
           this.requestedReviews.delete(tokenKey(chain, token.address));
+          deepComplete += 1;
           const favorite = this.controls?.value.annotations[tokenKey(chain, token.address)]?.favorite;
           if (candidate.status === 'X_REVIEW' && previousCandidate?.status !== 'X_REVIEW') {
             events = addEvent(events, 'CANDIDATE_NEW', `${token.symbol}：新增链上候选，需人工复核`, chain, { address: token.address });
@@ -761,6 +994,8 @@ export class Scanner {
           lastAuditHealth = { complete: false, checkedAt: auditedAt, code: String(error?.code || 'GMGN_REQUEST_FAILED') };
           events = addEvent(events, 'AUDIT_RETRY', `${token.symbol}：深审暂时失败，已进入复查队列`, chain, { address: token.address });
           if (error?.code === 'GMGN_RATE_LIMITED') break;
+        } finally {
+          if (deepTicket) this.budget.release(deepTicket);
         }
         auditsCompleted++;
       }
@@ -795,8 +1030,9 @@ export class Scanner {
         trending: { ok: false, code: String(discoveryError.code || 'GMGN_REQUEST_FAILED') } }
         : this.gmgn.lastDiscoveryHealth || { complete: true, checkedAt: now };
       const degraded = discoveryHealth.complete === false || auditHadError;
+      const baseState = throughputOn ? this.state.value : prior;
       const next = {
-        ...prior,
+        ...baseState,
         version: 2,
         status: degraded ? 'DEGRADED' : 'RUNNING',
         authMessage: '',
@@ -830,9 +1066,17 @@ export class Scanner {
           minimumAgeMinutes: settings.minAgeSec / 60,
           scanIntervalMs: settings.scanIntervalMs,
           execution: 'disabled',
-          xReview: 'manual'
+          xReview: 'manual',
+          throughputEnabled: throughputOn
         },
-        events
+        events,
+        throughput: {
+          ...(baseState.throughput || {}),
+          deepComplete: num(baseState.throughput?.deepComplete) + deepComplete,
+          observationComplete: num(baseState.throughput?.observationComplete) + observationsCompleted,
+          firstPublishedAt: firstPublishedAt || baseState.throughput?.firstPublishedAt || null,
+          budget: this.budget.snapshot()
+        }
       };
       next.auditQueueStats.auditedThisCycle = auditsCompleted;
       if (auditsCompleted) next.auditQueueStats.estimatedMinutes = Math.ceil(next.auditQueueStats.due / auditsCompleted) * settings.scanIntervalMs / 60_000;
@@ -907,5 +1151,10 @@ export class Scanner {
     await tick();
   }
 
-  stop() { this.stopped = true; if (this.timer) clearTimeout(this.timer); }
+  stop() {
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.supplements?.dispose?.();
+    this.budget?.persist?.();
+  }
 }

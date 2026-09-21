@@ -74,6 +74,16 @@ export function tokenInfoPrice(info) {
   return Number.isFinite(price) && price > 0 ? price : null;
 }
 
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function firstDefined(...values) {
+  return values.find(value => value !== undefined && value !== null && value !== '');
+}
+
 export function translateGmgnError(error) {
   let workerCode = '';
   let workerRetryMs = 0;
@@ -168,7 +178,15 @@ export class GmgnClient {
     return task;
   }
 
-  async runNow(args, { apiKey = this.apiKey(), privateKey = '', deadline = Infinity, verification = false } = {}) {
+  async runNow(args, {
+    apiKey = this.apiKey(),
+    privateKey = '',
+    deadline = Infinity,
+    verification = false,
+    budgetTicket = null,
+    budget = null,
+    budgetFamily = 'AUDIT'
+  } = {}) {
     if (this.disabled && !verification) throw translateGmgnError(new Error('invalid api key'));
     const epoch = this.keyEpoch;
     const now = Date.now();
@@ -187,6 +205,10 @@ export class GmgnClient {
     this.lastRequestAt = Date.now();
     this.lastWeight = requestWeight(args);
     this.metrics.requests++;
+    const weight = this.lastWeight;
+    if (verification) budget?.recordPhysical?.({ family: 'AUTH', requests: 1, weight });
+    else if (budgetTicket) budget?.consume?.(budgetTicket, { requests: 1, weight, dispatched: true });
+    else if (budget && budgetFamily) budget.recordPhysical?.({ family: budgetFamily, requests: 1, weight });
 
     let stdout, stderr;
     try {
@@ -238,6 +260,7 @@ export class GmgnClient {
     const cached = this.cache.get(key);
     if (!this.disabled && cached && cached.epoch === epoch && Date.now() - cached.at < ttlMs) {
       this.metrics.cacheHits++;
+      options.budget?.noteCacheHit?.(options.budgetTicket);
       return structuredClone(cached.value);
     }
     const value = await this.run(args, options);
@@ -246,6 +269,27 @@ export class GmgnClient {
       if (this.cache.size > 500) this.cache.delete(this.cache.keys().next().value);
     }
     return value;
+  }
+
+  async observe(address, chain = 'robinhood', { deadline = Infinity, budgetTicket = null, budget = null } = {}) {
+    if (Date.now() >= deadline) throw translateGmgnError(new Error('GMGN_TIMEOUT'));
+    const raw = await this.cachedRead(
+      ['token', 'info', '--chain', chain, '--address', address, '--raw'],
+      15_000,
+      { deadline, budgetTicket, budget, budgetFamily: 'AUDIT' }
+    );
+    const info = unwrap(raw) || {};
+    const collectedAt = Date.now();
+    return {
+      source: 'GMGN_INFO',
+      observedAt: collectedAt,
+      collectedAt,
+      price: tokenInfoPrice(info),
+      marketCap: numberOrNull(info?.market_cap),
+      liquidity: numberOrNull(firstDefined(info?.liquidity, info?.liquidity_usd)),
+      poolId: info?.pool_id == null && info?.poolId == null ? null : String(info.pool_id ?? info.poolId),
+      status: info?.status == null ? null : String(info.status)
+    };
   }
 
   async priceAt(address, targetAt, chain) {
@@ -307,7 +351,7 @@ export class GmgnClient {
     return [...merged.values()];
   }
 
-  async audit(address, nowSec = Math.floor(Date.now() / 1000), chain = 'robinhood', { shouldStopEarly, deadline = Infinity } = {}) {
+  async audit(address, nowSec = Math.floor(Date.now() / 1000), chain = 'robinhood', { shouldStopEarly, deadline = Infinity, budgetTicket = null, budget = null } = {}) {
     if (Date.now() >= deadline) throw translateGmgnError(new Error('GMGN_TIMEOUT'));
     const base = ['--chain', chain, '--address', address, '--raw'];
     const from = String(nowSec - 20 * 60), to = String(nowSec);
@@ -319,9 +363,10 @@ export class GmgnClient {
       ['traders', ['token', 'traders', '--chain', chain, '--address', address, '--limit', '50', '--raw']],
       ['candles', ['market', 'kline', '--chain', chain, '--address', address, '--resolution', '1m', '--from', from, '--to', to, '--raw']]
     ];
+    const readOpts = { deadline, budgetTicket, budget, budgetFamily: 'AUDIT' };
     // Static contract evidence is fetched first. Dynamic endpoints follow only after
     // the first stage has had a chance to surface provider-level failures.
-    const staticCalls = await Promise.allSettled(specs.slice(0, 3).map(([name, args]) => this.cachedRead(args, name === 'security' ? 60_000 : 15_000, { deadline })));
+    const staticCalls = await Promise.allSettled(specs.slice(0, 3).map(([name, args]) => this.cachedRead(args, name === 'security' ? 60_000 : 15_000, readOpts)));
     const partial = {
       info: staticCalls[0].status === 'fulfilled' ? unwrap(staticCalls[0].value) : {},
       security: staticCalls[1].status === 'fulfilled' ? unwrap(staticCalls[1].value) : {},
@@ -329,7 +374,7 @@ export class GmgnClient {
       holders: [], traders: [], candles: [], _meta: { complete: false, earlyExit: true }
     };
     if (staticCalls.every(x => x.status === 'fulfilled') && shouldStopEarly?.(partial)) return partial;
-    const dynamicCalls = await Promise.allSettled(specs.slice(3).map(([, args]) => this.cachedRead(args, 15_000, { deadline })));
+    const dynamicCalls = await Promise.allSettled(specs.slice(3).map(([, args]) => this.cachedRead(args, 15_000, readOpts)));
     const calls = [...staticCalls, ...dynamicCalls];
     const endpoints = Object.fromEntries(specs.map(([name], index) => [name,
       calls[index].status === 'fulfilled' ? { ok: true } : errorSummary(calls[index].reason)

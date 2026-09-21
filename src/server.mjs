@@ -329,7 +329,22 @@ function publicWatchPool(rows) {
     reportedOutcome: ['USER_REPORTED_RUG', 'USER_REPORTED_GRADUATED'].includes(row.reportedOutcome) ? row.reportedOutcome : '',
     firstSeenAt: finiteOrNull(row.firstSeenAt), lastSeenAt: finiteOrNull(row.lastSeenAt), nextCheckAt: finiteOrNull(row.nextCheckAt),
     checkCount: finiteOrNull(row.checkCount), paused: row.paused === true, riskLatched: row.riskLatched === true,
-    latest: publicWatchSample(row.latest), history: Array.isArray(row.history) ? row.history.slice(-50).map(publicWatchSample).filter(Boolean) : []
+    latest: publicWatchSample(row.latest), history: Array.isArray(row.history) ? row.history.slice(-50).map(publicWatchSample).filter(Boolean) : [],
+    lastObservation: row.lastObservation && typeof row.lastObservation === 'object' ? {
+      source: publicMessage(row.lastObservation.source, 'GMGN_INFO', 40),
+      observedAt: finiteOrNull(row.lastObservation.observedAt),
+      collectedAt: finiteOrNull(row.lastObservation.collectedAt),
+      price: finiteOrNull(row.lastObservation.price),
+      marketCap: finiteOrNull(row.lastObservation.marketCap),
+      liquidity: finiteOrNull(row.lastObservation.liquidity),
+      changeDetected: row.lastObservation.changeDetected === true
+    } : null,
+    observationCount: finiteOrNull(row.observationCount),
+    nextObservationAt: finiteOrNull(row.nextObservationAt),
+    lastObservationError: row.lastObservationError && typeof row.lastObservationError === 'object' ? {
+      at: finiteOrNull(row.lastObservationError.at),
+      code: publicMessage(row.lastObservationError.code, 'OBSERVE_FAILED', 80)
+    } : null
   }));
 }
 

@@ -3498,10 +3498,15 @@
           : row.reportedOutcome === 'USER_REPORTED_GRADUATED' ? '已毕业（用户标注，未核验）' : '';
         return '<article class="saved-row"><strong>' + escapeHtml(row.symbol || '?') + '</strong> <span class="mono">' + escapeHtml(row.address) + '</span>'
           + '<div>' + escapeHtml(row.label || '') + ' ' + escapeHtml(outcome) + '</div>'
-          + '<div>复查次数：' + escapeHtml(formatCount(row.checkCount)) + ' · 下次：' + escapeHtml(row.paused ? '已暂停' : row.nextCheckAt ? formatClock(row.nextCheckAt) : '--')
+          + '<div>深审次数：' + escapeHtml(formatCount(row.checkCount)) + ' · 下次深审：' + escapeHtml(row.paused ? '已暂停' : row.nextCheckAt ? formatClock(row.nextCheckAt) : '--')
+          + ' · 轻采样：' + escapeHtml(formatCount(row.observationCount)) + ' · 下次行情：' + escapeHtml(row.paused ? '已暂停' : row.nextObservationAt ? formatClock(row.nextObservationAt) : '--')
           + ' · ' + (row.riskLatched ? '<strong class="bad">风险隔离</strong>' : '未隔离，不代表安全') + '</div>'
+          + (row.lastObservation ? '<div class="muted">最近轻采样：' + escapeHtml(row.lastObservation.observedAt ? formatClock(row.lastObservation.observedAt) : '--')
+            + ' · 价格 ' + escapeHtml(row.lastObservation.price == null ? '--' : row.lastObservation.price)
+            + (row.lastObservationError ? ' · 最近失败 ' + escapeHtml(formatClock(row.lastObservationError.at)) + ' ' + escapeHtml(row.lastObservationError.code || '') : '')
+            + '</div>' : '')
           + '<div>' + sample(row.latest || {}) + '</div>'
-          + '<details><summary>复查历史（最近 ' + (row.history || []).length + ' 次）</summary>'
+          + '<details><summary>深审历史（最近 ' + (row.history || []).length + ' 次）</summary>'
           + (row.history || []).slice(-50).map(function (entry) { return '<div class="saved-row">' + escapeHtml(entry.at ? formatClock(entry.at) : '--') + ' · ' + sample(entry) + '</div>'; }).join('')
           + '</details><button class="mini-button" type="button" data-watch-pause="' + (row.paused ? 'false' : 'true') + '" data-chain="' + escapeHtml(row.chain)
           + '" data-address="' + encodeURIComponent(row.address) + '">' + (row.paused ? '恢复复查' : '暂停复查') + '</button></article>';

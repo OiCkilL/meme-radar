@@ -17,6 +17,7 @@ export const config = Object.freeze({
   maxDeepAuditsPerCycle: boundedInteger(process.env.MAX_DEEP_AUDITS_PER_CYCLE, 6, 1, 12),
   auditCycleBudgetMs: 80_000,
   outcomeReadsPerCycle: 4,
+  throughputEnabled: process.env.THROUGHPUT_MODE === '1' || process.env.THROUGHPUT_MODE === 'true',
   xReviewMode: 'manual',
   minAgeSec: 5 * 60,
   maxAgeSec: 7 * 86400,

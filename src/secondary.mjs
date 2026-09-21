@@ -128,15 +128,32 @@ async function readLimitedText(response, maxBytes) {
   return text;
 }
 
-async function requestJson(fetchImpl, url, { timeoutMs, maxResponseBytes }) {
+async function requestJson(fetchImpl, url, { timeoutMs, maxResponseBytes, deadline = Infinity }) {
+  const remaining = Math.min(timeoutMs, deadline - Date.now());
+  if (!(remaining > 0)) {
+    const timeout = new Error('request timed out');
+    timeout.code = 'TIMEOUT';
+    throw timeout;
+  }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      const timeout = new Error('request timed out');
+      timeout.code = 'TIMEOUT';
+      reject(timeout);
+    }, remaining);
+  });
   try {
-    const response = await fetchImpl(url, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      signal: controller.signal
-    });
+    const response = await Promise.race([
+      fetchImpl(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: controller.signal
+      }),
+      timeoutPromise
+    ]);
     if (!response || typeof response.ok !== 'boolean') {
       const error = new Error('invalid response');
       error.code = 'INVALID_RESPONSE';
@@ -153,7 +170,24 @@ async function requestJson(fetchImpl, url, { timeoutMs, maxResponseBytes }) {
       error.code = 'INVALID_CONTENT_TYPE';
       throw error;
     }
-    const text = await readLimitedText(response, maxResponseBytes);
+    const bodyRemaining = Math.min(remaining, deadline - Date.now());
+    if (!(bodyRemaining > 0)) {
+      const timeout = new Error('request timed out');
+      timeout.code = 'TIMEOUT';
+      throw timeout;
+    }
+    const text = await Promise.race([
+      readLimitedText(response, maxResponseBytes),
+      new Promise((_, reject) => {
+        const bodyTimer = setTimeout(() => {
+          controller.abort();
+          const timeout = new Error('request timed out');
+          timeout.code = 'TIMEOUT';
+          reject(timeout);
+        }, bodyRemaining);
+        controller.signal.addEventListener('abort', () => clearTimeout(bodyTimer), { once: true });
+      })
+    ]);
     let parsed;
     try {
       parsed = JSON.parse(text);
@@ -169,7 +203,7 @@ async function requestJson(fetchImpl, url, { timeoutMs, maxResponseBytes }) {
     }
     return parsed;
   } catch (error) {
-    if (controller.signal.aborted && error?.code !== 'RESPONSE_TOO_LARGE') {
+    if (error?.code === 'TIMEOUT' || (controller.signal.aborted && error?.code !== 'RESPONSE_TOO_LARGE')) {
       const timeout = new Error('request timed out');
       timeout.code = 'TIMEOUT';
       throw timeout;
@@ -400,7 +434,7 @@ export class SecondaryValidator {
     };
   }
 
-  async validate({ chain, tokenAddress, primary = {} }) {
+  async validate({ chain, tokenAddress, primary = {}, deadline = Infinity }) {
     const normalizedChain = cleanString(chain, 24).toLowerCase();
     const address = cleanString(tokenAddress, 128);
     const dexChainId = DEX_CHAIN_IDS[normalizedChain];
@@ -420,14 +454,24 @@ export class SecondaryValidator {
       return { status: 'DEGRADED', complete: false, checkedAt: this.now(), chain: normalizedChain, tokenAddress: address, sources, market, security, conflicts: [] };
     }
 
+    if (!(deadline - this.now() > 0) && (dexSupported || goPlusSupported)) {
+      if (dexSupported) sources.dexScreener = sourceState('ERROR', { errorCode: 'TIMEOUT' });
+      if (goPlusSupported) sources.goPlus = sourceState('ERROR', { errorCode: 'TIMEOUT' });
+      security = { complete: false, verdict: 'UNKNOWN', fatal: [], unknownFields: ['tokenSecurity'], fields: {}, buyTax: null, sellTax: null };
+      return {
+        status: 'DEGRADED', complete: false, checkedAt: this.now(),
+        chain: normalizedChain, tokenAddress: address, sources, market, security, conflicts: []
+      };
+    }
+
     const dexUrl = dexSupported ? `https://api.dexscreener.com/token-pairs/v1/${dexChainId}/${encodeURIComponent(address)}` : '';
     const goPlusUrl = !goPlusSupported ? '' : normalizedChain === 'sol'
       ? `https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${encodeURIComponent(address)}`
       : `https://api.gopluslabs.io/api/v1/token_security/${goPlusChainId}?contract_addresses=${encodeURIComponent(address)}`;
 
     const [dexResult, goPlusResult] = await Promise.all([
-      dexSupported ? this.fetchDex(dexUrl, { chain: normalizedChain, dexChainId, tokenAddress: address }) : null,
-      goPlusSupported ? this.fetchGoPlus(goPlusUrl, { chain: normalizedChain, tokenAddress: address }) : null
+      dexSupported ? this.fetchDex(dexUrl, { chain: normalizedChain, dexChainId, tokenAddress: address, deadline }) : null,
+      goPlusSupported ? this.fetchGoPlus(goPlusUrl, { chain: normalizedChain, tokenAddress: address, deadline }) : null
     ]);
 
     if (dexResult) {
@@ -449,7 +493,7 @@ export class SecondaryValidator {
 
   async fetchDex(url, context) {
     try {
-      const payload = await requestJson(this.fetchImpl, url, this);
+      const payload = await requestJson(this.fetchImpl, url, { ...this, deadline: context.deadline });
       const parsed = parseDexScreener(payload, context);
       return { source: sourceState(parsed.found ? 'OK' : 'NO_DATA'), market: parsed.market };
     } catch (error) {
@@ -459,7 +503,7 @@ export class SecondaryValidator {
 
   async fetchGoPlus(url, context) {
     try {
-      const payload = await requestJson(this.fetchImpl, url, this);
+      const payload = await requestJson(this.fetchImpl, url, { ...this, deadline: context.deadline });
       const parsed = parseGoPlus(payload, context);
       return { source: sourceState(parsed.found ? 'OK' : 'NO_DATA'), security: parsed.security };
     } catch (error) {
