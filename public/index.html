@@ -1683,6 +1683,18 @@
       flex-wrap: wrap;
       margin-top: 6px;
     }
+    .settings-num-input {
+      width: 88px;
+      min-width: 88px;
+      flex: 0 0 auto;
+    }
+    .settings-num-field {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text);
+      font-size: 14px;
+    }
     .settings-api-input {
       flex: 1;
       min-width: 220px;
@@ -2792,6 +2804,13 @@
         <p class="muted">默认关闭：K 线形态命中只当次待复查，观察池仍会继续盯。打开后按链＋合约写入排除表，重启也不自动取消；关闭开关只停止使用该表，不清空已记录项。</p>
         <label class="manage-actions"><input id="throughputEnabled" type="checkbox"> 启用提速调度（轻采样与逐币发布）</label>
         <p class="muted">默认关闭，走原来的整轮深审路径。打开后用公平排队、info 轻采样和逐币发布；轻采样只更新行情，不是完整安全审核，也不能洗白已锁存风险。下一轮扫描生效，保存在本机。</p>
+        <label class="manage-actions"><input id="creatorHistoryEnabled" type="checkbox"> 按创建者发币履历过滤</label>
+        <p class="muted">默认关闭。打开后：发币数超过你填的上限，且成功迁移（毕业）比例低于你填的线时才挡。发币多是负面信号，成功率越高越好。缺发币数或毕业数不当作命中。团队高持仓不会单凭这一项硬拒。</p>
+        <div class="settings-api-row">
+          <label class="settings-num-field">发币不多于 <input id="creatorHistoryMaxLaunch" class="settings-api-input settings-num-input" type="number" min="1" max="100000" step="1" inputmode="numeric" placeholder="50"></label>
+          <label class="settings-num-field">成功迁移不低于 <input id="creatorHistoryMinSuccess" class="settings-api-input settings-num-input" type="number" min="0" max="100" step="1" inputmode="decimal" placeholder="10"> %</label>
+          <button id="saveCreatorHistory" class="mini-button" type="button">保存履历门槛</button>
+        </div>
         <div class="manage-actions">
           <button id="saveChains" class="mini-button" type="button" data-i18n="saveChains">保存扫描链</button>
           <button id="notificationButton" class="mini-button" type="button" data-i18n="enableAlerts">开启桌面提醒</button>
@@ -3532,6 +3551,15 @@
       }).join('');
       byId('chartRiskExclusionEnabled').checked = data.chartRiskExclusion === true;
       byId('throughputEnabled').checked = data.throughputEnabled === true;
+      const history = data.creatorHistory || {};
+      byId('creatorHistoryEnabled').checked = history.enabled === true;
+      const historyFocus = document.activeElement;
+      if (historyFocus !== byId('creatorHistoryMaxLaunch') && historyFocus !== byId('creatorHistoryMinSuccess')) {
+        const launches = history.maxLaunchCount ?? history.minLaunchCount;
+        byId('creatorHistoryMaxLaunch').value = launches == null ? '' : String(launches);
+        const success = history.minSuccessRate ?? history.maxSuccessRate;
+        byId('creatorHistoryMinSuccess').value = success == null ? '' : String(Math.round(success * 1000) / 10);
+      }
       byId('schedulerDetail').textContent = t('schedulerSummary', { chains: enabled.join(' / '), current: scheduler.scanningChain || activeChain(data) });
       byId('notificationButton').textContent = t(alertsEnabled ? 'muteAlerts' : 'enableAlerts');
       byId('savedNotes').innerHTML = Object.values(data.annotations || {}).map(function (row) {
@@ -4840,6 +4868,31 @@
         event.target.checked = !enabled;
         showToast(t('settingsFailed'));
       }
+    });
+    async function saveCreatorHistory() {
+      const maxRaw = byId('creatorHistoryMaxLaunch').value.trim();
+      const successRaw = byId('creatorHistoryMinSuccess').value.trim();
+      const maxLaunchCount = maxRaw === '' ? null : Number(maxRaw);
+      const percent = successRaw === '' ? null : Number(successRaw);
+      const payload = {
+        enabled: byId('creatorHistoryEnabled').checked === true,
+        maxLaunchCount: maxLaunchCount,
+        minSuccessRate: percent === null ? null : percent / 100
+      };
+      const saved = await postLocal('/api/preferences', { creatorHistory: payload });
+      if (lastData) lastData.creatorHistory = saved.creatorHistory || payload;
+      showToast(t('settingsSaved'));
+    }
+    byId('creatorHistoryEnabled').addEventListener('change', async function (event) {
+      try { await saveCreatorHistory(); }
+      catch {
+        event.target.checked = !event.target.checked;
+        showToast(t('settingsFailed'));
+      }
+    });
+    byId('saveCreatorHistory').addEventListener('click', async function () {
+      try { await saveCreatorHistory(); }
+      catch { showToast(t('settingsFailed')); }
     });
     byId('saveChains').addEventListener('click', async function () {
       const chains = Array.from(byId('scanSelection').querySelectorAll('input:checked')).map(function (input) { return input.value; });

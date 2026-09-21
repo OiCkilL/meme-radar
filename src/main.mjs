@@ -43,7 +43,7 @@ try { ave = createAveSettings({ directory: config.stateDir }); }
 catch { console.error('AVE 本机配置无法读取；原文件保留，GMGN 扫描不受影响。'); }
 const scanner = new Scanner({ gmgn, secondary: new SecondaryValidator(), nansen, state, controls, watchPool });
 const connection = new GmgnConnection({ gmgn, keyStore, scanner });
-const liveDiscovery = new LiveDiscovery({ gmgn });
+const liveDiscovery = new LiveDiscovery({ gmgn, controls });
 
 if (once) {
   await scanner.cycle();

@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { config } from '../src/config.mjs';
 import {
-  discoveryScreen, analyzeWallets, observeFiveMinutes, deepScreen, empiricalSellability, marketBehaviorScreen
+  discoveryScreen, analyzeWallets, observeFiveMinutes, deepScreen, empiricalSellability, marketBehaviorScreen,
+  creatorHistoryGate, knownRiskReasons
 } from '../src/scoring.mjs';
 
 const nowSec = 1_800_000_000;
@@ -15,6 +16,58 @@ const validHolders = () => Array.from({ length: 10 }, (_, i) => ({
 const recentTraders = () => Array.from({ length: 5 }, (_, i) => ({
   address: `seller-${i}`, sell_tx_count_cur: 1, last_active_timestamp: nowSec - 60
 }));
+
+test('creator history gate uses launch count and success ratio, never invents missing stats', () => {
+  const policy = { enabled: true, maxLaunchCount: 50, minSuccessRate: 0.10 };
+  const hit = creatorHistoryGate(
+    { creator_created_count: 997, creator_created_open_count: 99 },
+    {},
+    policy
+  );
+  assert.equal(hit.hit, true);
+  assert.equal(hit.unknown, false);
+  assert.ok(hit.successRate < 0.10);
+
+  const graduated = creatorHistoryGate(
+    { creator_created_count: 997, creator_created_open_count: 200 },
+    {},
+    policy
+  );
+  assert.equal(graduated.hit, false);
+
+  const few = creatorHistoryGate(
+    { creator_created_count: 20, creator_created_open_count: 1 },
+    {},
+    policy
+  );
+  assert.equal(few.hit, false);
+
+  const missing = creatorHistoryGate({ creator_created_count: 997 }, {}, policy);
+  assert.equal(missing.hit, false);
+  assert.equal(missing.unknown, true);
+
+  const off = creatorHistoryGate(
+    { creator_created_count: 997, creator_created_open_count: 1 },
+    {},
+    { enabled: false, maxLaunchCount: 50, minSuccessRate: 0.10 }
+  );
+  assert.equal(off.active, false);
+  assert.equal(off.hit, false);
+
+  const row = {
+    address, market_cap: 50_000, liquidity: 10_000, creation_timestamp: nowSec - 600,
+    rug_ratio: .1, bundler_rate: .1, rat_trader_amount_rate: .1, is_wash_trading: false, is_honeypot: 0,
+    creator_created_count: 997, creator_created_open_count: 99
+  };
+  assert.equal(discoveryScreen(row, { ...config, chain: 'bsc', creatorHistory: policy }, nowSec).pass, false);
+  assert.ok(knownRiskReasons(row, { ...config, creatorHistory: policy }).some(text => /履历/.test(text)));
+  const deep = deepScreen({
+    discovery: { creator_created_count: 997, creator_created_open_count: 99 },
+    audit: { info: {}, security: {}, pool: {}, holders: [], traders: [], candles: [] }
+  }, { ...config, creatorHistory: policy });
+  assert.equal(deep.checks.creatorHistory, false);
+  assert.equal(deep.blockingUnknownFields.includes('creatorHistory'), false);
+});
 
 test('discovery waits five minutes and prioritizes 20k-80k market cap', () => {
   const base = { address, market_cap: 50_000, liquidity: 10_000, creation_timestamp: nowSec - 301, rug_ratio: .1, bundler_rate: .1, rat_trader_amount_rate: .1, is_wash_trading: false, is_honeypot: 0 };

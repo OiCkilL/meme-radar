@@ -39,6 +39,38 @@ export function readJsonWithBackup(file, fallback) {
   throw Object.assign(new Error('本地记录与备份均无法读取，请保留文件后检查。'), { code: 'STATE_CORRUPT' });
 }
 
+export function normalizeCreatorHistory(raw, { allowIncomplete = false } = {}) {
+  if (raw == null || raw === '') {
+    return { enabled: false, maxLaunchCount: null, minSuccessRate: null };
+  }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw Object.assign(new Error('invalid_settings'), { statusCode: 400 });
+  }
+  const enabled = raw.enabled === true;
+  const launchRaw = raw.maxLaunchCount ?? raw.minLaunchCount;
+  let maxLaunchCount = null;
+  if (launchRaw !== null && launchRaw !== undefined && launchRaw !== '') {
+    const n = Number(launchRaw);
+    if (!Number.isInteger(n) || n < 1 || n > 100000) {
+      throw Object.assign(new Error('invalid_settings'), { statusCode: 400 });
+    }
+    maxLaunchCount = n;
+  }
+  const successRaw = raw.minSuccessRate ?? raw.maxSuccessRate;
+  let minSuccessRate = null;
+  if (successRaw !== null && successRaw !== undefined && successRaw !== '') {
+    const n = Number(successRaw);
+    if (!Number.isFinite(n) || n < 0 || n > 1) {
+      throw Object.assign(new Error('invalid_settings'), { statusCode: 400 });
+    }
+    minSuccessRate = n;
+  }
+  if (enabled && (maxLaunchCount === null || minSuccessRate === null) && !allowIncomplete) {
+    throw Object.assign(new Error('invalid_settings'), { statusCode: 400 });
+  }
+  return { enabled: enabled && maxLaunchCount !== null && minSuccessRate !== null, maxLaunchCount, minSuccessRate };
+}
+
 export function tokenKey(chain, address) {
   const value = String(address || '').trim();
   return `${chain}:${chain === 'sol' ? value : value.toLowerCase()}`;
@@ -48,7 +80,10 @@ export class RadarControls {
   constructor(dir, chains, initialChain) {
     this.file = path.join(dir, 'preferences.json');
     this.chains = chains;
-    const defaults = { enabledChains: [initialChain], annotations: {}, chartRiskExclusion: false, throughputEnabled: false };
+    const defaults = {
+      enabledChains: [initialChain], annotations: {}, chartRiskExclusion: false, throughputEnabled: false,
+      creatorHistory: { enabled: false, maxLaunchCount: null, minSuccessRate: null }
+    };
     const loaded = readJsonWithBackup(this.file, {}).value;
     this.value = { ...defaults, ...loaded };
     this.value.enabledChains = [...new Set(this.value.enabledChains)].filter(x => chains.includes(x)).slice(0, 3);
@@ -59,6 +94,11 @@ export class RadarControls {
       this.value.throughputEnabled = true;
     } else {
       this.value.throughputEnabled = this.value.throughputEnabled === true;
+    }
+    try {
+      this.value.creatorHistory = normalizeCreatorHistory(this.value.creatorHistory, { allowIncomplete: true });
+    } catch {
+      this.value.creatorHistory = { enabled: false, maxLaunchCount: null, minSuccessRate: null };
     }
   }
   setChartRiskExclusion(enabled) {
@@ -72,6 +112,11 @@ export class RadarControls {
     this.value.throughputEnabled = enabled;
     atomicJson(this.file, this.value);
     return { throughputEnabled: this.value.throughputEnabled };
+  }
+  setCreatorHistory(raw) {
+    this.value.creatorHistory = normalizeCreatorHistory(raw, { allowIncomplete: !raw?.enabled });
+    atomicJson(this.file, this.value);
+    return { creatorHistory: this.value.creatorHistory };
   }
   setChains(chains) {
     if (!Array.isArray(chains) || !chains.length || chains.length > 3 || new Set(chains).size !== chains.length || chains.some(x => !this.chains.includes(x))) {

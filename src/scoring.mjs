@@ -60,6 +60,33 @@ const num = (value, fallback = 0) => optionalNumber(value) ?? fallback;
 const first = (...values) => values.find(value => value !== undefined && value !== null && value !== '');
 const lower = value => String(value ?? '').toLowerCase();
 
+export function creatorHistoryGate(discovery = {}, info = {}, policy = null) {
+  if (!policy || policy.enabled !== true || policy.maxLaunchCount == null || policy.minSuccessRate == null) {
+    return { active: false, hit: false, unknown: false, launched: null, graduated: null, successRate: null };
+  }
+  const launched = optionalCount(first(
+    info.dev?.creator_open_count,
+    discovery.creator_created_count,
+    discovery.creator_open_count
+  ));
+  const graduated = optionalCount(first(
+    discovery.creator_created_open_count,
+    info.dev?.creator_created_open_count
+  ));
+  if (launched === null || graduated === null || launched <= 0 || graduated > launched) {
+    return { active: true, hit: false, unknown: true, launched, graduated, successRate: null };
+  }
+  const successRate = graduated / launched;
+  return {
+    active: true,
+    hit: launched > policy.maxLaunchCount && successRate < policy.minSuccessRate,
+    unknown: false,
+    launched,
+    graduated,
+    successRate
+  };
+}
+
 function normalizeAddress(value, chain = 'robinhood') {
   if (typeof value !== 'string') return '';
   const normalized = value.trim();
@@ -143,6 +170,9 @@ export function knownRiskReasons(row, config) {
   if (dev !== null && dev > .01) reasons.push('DEV持仓超过1%');
   // 绝不将实时数据流的通用1分钟计数器误判为5分钟活动
   if (optionalNumber(row.volume_5m) === 0) reasons.push('近5分钟无成交，暂不进入候选');
+  if (creatorHistoryGate(row, { dev: row }, config.creatorHistory).hit) {
+    reasons.push('创建者发币履历命中用户门槛');
+  }
   return reasons;
 }
 
@@ -567,6 +597,7 @@ export function deepScreen({ discovery, audit, nowMs = Date.now() }, config) {
     discovery, info, holders: audit.holders, observation, nowMs
   }, config);
   const sellability = empiricalSellability({ info, discovery, traders: audit.traders, nowSec: nowMs / 1000, chain: config.chain });
+  const history = creatorHistoryGate(discovery, info, config.creatorHistory);
   const exactNotHoneypot = honeypot === false;
   const explicitHoneypot = honeypot === true;
   const checks = {
@@ -588,7 +619,8 @@ export function deepScreen({ discovery, audit, nowMs = Date.now() }, config) {
     wallets: wallets.pass,
     observation: observation.pass,
     chartRisk: chartRisk.pass,
-    marketBehavior: marketBehavior.pass
+    marketBehavior: marketBehavior.pass,
+    creatorHistory: !history.active || (!history.hit && !history.unknown)
   };
   const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
   const chainPass = failed.length === 0;
@@ -614,7 +646,8 @@ export function deepScreen({ discovery, audit, nowMs = Date.now() }, config) {
     ...wallets.unknownFields,
     ...observation.unknownFields,
     ...chartRisk.unknownFields,
-    ...(!isSol && honeypot !== false ? sellability.unknownFields : [])
+    ...(!isSol && honeypot !== false ? sellability.unknownFields : []),
+    history.active && history.unknown ? 'creatorHistory' : null
   ].filter(Boolean);
   const blockingUnknownFields = [
     openSource === null ? 'openSource' : null,
@@ -636,7 +669,8 @@ export function deepScreen({ discovery, audit, nowMs = Date.now() }, config) {
     ...wallets.unknownFields,
     ...(observation.status === 'WAITING' ? observation.unknownFields : []),
     ...chartRisk.unknownFields,
-    ...(!isSol && honeypot === null && !sellability.pass ? sellability.unknownFields : [])
+    ...(!isSol && honeypot === null && !sellability.pass ? sellability.unknownFields : []),
+    history.active && history.unknown ? 'creatorHistory' : null
   ].filter(Boolean);
   return {
     chainPass, failed, checks, wallets, observation, chartRisk, marketBehavior, sellability, honeypotEvidence,

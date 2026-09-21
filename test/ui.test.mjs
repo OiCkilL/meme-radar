@@ -109,6 +109,11 @@ test('形态风险展示为复查，旧规则版本不能被人工标成通过',
   assert.match(html, /id="chartRiskExclusionEnabled"/);
   assert.match(html, /id="throughputEnabled"/);
   assert.match(html, /启用提速调度/);
+  assert.match(html, /id="creatorHistoryEnabled"/);
+  assert.match(html, /id="creatorHistoryMaxLaunch"/);
+  assert.match(html, /发币不多于/);
+  assert.match(html, /id="creatorHistoryMinSuccess"/);
+  assert.match(html, /成功迁移不低于/);
   assert.doesNotMatch(html, /applyRiskExclusion/);
 });
 

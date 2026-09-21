@@ -139,7 +139,8 @@ export function classifyDeepResult(deep, auditMeta = {}, options = {}) {
       lpLocked: ['lockRate'], notHoneypot: ['honeypot', 'sellability.'], tax: ['buyTax', 'sellTax'],
       rug: ['rugRatio'], concentration: ['top10'], dev: ['devHold'], insider: ['insider'],
       bundler: ['bundler'], sniper: ['sniperHold'], wash: ['wash'], liquidity: ['liquidity'],
-      wallets: ['holders.'], observation: ['candles'], chartRisk: ['chartRisk.']
+      wallets: ['holders.'], observation: ['candles'], chartRisk: ['chartRisk.'],
+      creatorHistory: ['creatorHistory']
     }[name] || [];
     return [...unknown].some(field => prefixes.some(prefix => field === prefix || field.startsWith(prefix)));
   };
@@ -456,7 +457,9 @@ export class Scanner {
     }
     const enabled = this.controls?.value.enabledChains || [this.activeChain];
     if (!enabled.includes(chain)) return { accepted: false, reason: 'chain_not_scanning' };
-    if (!row || !discoveryScreen(row, { ...this.config, chain }).pass) return { accepted: false, reason: 'outside_audit_scope' };
+    if (!row || !discoveryScreen(row, { ...this.config, chain, creatorHistory: this.controls?.value.creatorHistory }).pass) {
+      return { accepted: false, reason: 'outside_audit_scope' };
+    }
     const scope = this.activeChain === chain ? this.state.value : this.state.value.chainStates?.[chain];
     const queued = scope?.auditQueue?.find(item => addressKey(item.address) === addressKey(row.address));
     if (queued?.status === 'HARD_REJECT' && queued.nextAuditAt > Date.now()) return { accepted: false, reason: 'risk_rejected' };
@@ -474,6 +477,7 @@ export class Scanner {
     const chain = this.activeChain;
     const chainCount = this.controls?.value.enabledChains.length || 1;
     const settings = { ...this.config, chain,
+      creatorHistory: this.controls?.value.creatorHistory,
       maxDeepAuditsPerCycle: Math.max(1, Math.ceil(this.config.maxDeepAuditsPerCycle / chainCount)),
       auditCycleBudgetMs: Math.max(20_000, (this.config.auditCycleBudgetMs || 80_000) / chainCount),
       outcomeReadsPerCycle: Math.max(1, Math.ceil((this.config.outcomeReadsPerCycle || 4) / chainCount))

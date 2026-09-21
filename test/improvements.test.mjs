@@ -189,6 +189,11 @@ test('settings endpoints validate origin/schema; view/export exposes whitelisted
   assert.equal((await dispatch(server,'POST','/api/preferences',{throughputEnabled:true})).status,200);
   assert.equal((await dispatch(server,'GET','/api/status')).body.throughputEnabled, true);
   assert.equal((await dispatch(server,'POST','/api/preferences',{throughputEnabled:'yes'})).status,400);
+  assert.equal((await dispatch(server,'POST','/api/preferences',{creatorHistory:{enabled:true}})).status,400);
+  const history = await dispatch(server,'POST','/api/preferences',{creatorHistory:{enabled:true,maxLaunchCount:50,minSuccessRate:0.1}});
+  assert.equal(history.status,200);
+  assert.deepEqual(history.body.creatorHistory,{enabled:true,maxLaunchCount:50,minSuccessRate:0.1});
+  assert.deepEqual((await dispatch(server,'GET','/api/status')).body.creatorHistory,{enabled:true,maxLaunchCount:50,minSuccessRate:0.1});
   assert.equal((await dispatch(server,'POST','/api/gmgn-disconnect',{},false)).status,403);
   assert.equal((await dispatch(server,'POST','/api/gmgn-disconnect',{})).body.disconnected,true);
   const status=await dispatch(server,'GET','/api/status?chain=sol');

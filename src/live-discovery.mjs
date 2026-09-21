@@ -24,13 +24,13 @@ export function liveRequestArgs(chain) {
 }
 
 // This is a discovery snapshot, never an audit verdict. No extra per-token reads.
-export function normalizeLiveRows(input, chain, previous = [], at = Date.now(), initialized = false) {
+export function normalizeLiveRows(input, chain, previous = [], at = Date.now(), initialized = false, screenConfig = config) {
   const before = new Map(previous.map(row => [identity(chain, row.address), row]));
   const unique = new Map();
   for (const raw of input.slice(0, 100)) {
     if (!raw || !addressValid(chain, raw.address) || (raw.chain && raw.chain !== chain)) continue;
     const address = identity(chain, raw.address);
-    if (knownRiskReasons(raw, config).length) continue;
+    if (knownRiskReasons(raw, screenConfig).length) continue;
     const mc = number(raw.market_cap), liquidity = number(raw.liquidity), created = number(raw.creation_timestamp);
     if (mc === null || mc < 10000 || mc > 500000 || liquidity === null || liquidity < 3000
       || created === null || created <= 0 || at / 1000 - created < 300) continue;
@@ -55,15 +55,15 @@ export function normalizeLiveRows(input, chain, previous = [], at = Date.now(), 
       smartDelta: comparable && smart !== null && old.smartMoney !== null ? smart - old.smartMoney : null,
       priorityBand: mc >= 20000 && mc <= 80000, hasUnknownRisk,
       website: safeUrl(raw.website), twitter: safeText(raw.twitter_username, 80),
-      auditEligible: discoveryScreen(raw, { ...config, chain }, at / 1000).pass
+      auditEligible: discoveryScreen(raw, { ...screenConfig, chain }, at / 1000).pass
     });
   }
   return [...unique.values()].sort((a, b) => (b.volume1m || 0) - (a.volume1m || 0));
 }
 
 export class LiveDiscovery {
-  constructor({ gmgn, settings = config, now = Date.now, intervalMs = 20000, leaseMs = 30000, schedule = setTimeout, cancel = clearTimeout }) {
-    this.gmgn = gmgn; this.settings = settings; this.now = now; this.intervalMs = Math.max(20000, intervalMs);
+  constructor({ gmgn, settings = config, controls = null, now = Date.now, intervalMs = 20000, leaseMs = 30000, schedule = setTimeout, cancel = clearTimeout }) {
+    this.gmgn = gmgn; this.settings = settings; this.controls = controls; this.now = now; this.intervalMs = Math.max(20000, intervalMs);
     this.leaseMs = leaseMs; this.schedule = schedule; this.cancel = cancel;
     this.states = new Map(); this.raw = new Map(); this.focus = ''; this.leaseUntil = 0;
     this.nextPollAt = 0; this.running = false; this.timer = null; this.stopped = false; this.epoch = gmgn.keyEpoch;
@@ -108,7 +108,10 @@ export class LiveDiscovery {
       if (!Array.isArray(payload) && !Array.isArray(payload?.rank)) throw new Error('invalid_live_response');
       const input = normalizeList(result, ['rank']);
       const now = this.now();
-      const rows = normalizeLiveRows(input, chain, old.rows, now, old.lastSuccessAt > 0);
+      const rows = normalizeLiveRows(input, chain, old.rows, now, old.lastSuccessAt > 0, {
+        ...this.settings,
+        creatorHistory: this.controls?.value.creatorHistory
+      });
       this.states.set(chain, { rows, status: 'READY', lastAttemptAt: at, lastSuccessAt: now,
         requestMs: now - at, pollCount: old.pollCount + 1, receivedCount: input.length, filteredCount: Math.max(0, input.length - rows.length) });
       this.raw.set(chain, new Map(input.filter(row => row && addressValid(chain, row.address) && rows.some(x => identity(chain, row.address) === x.address))

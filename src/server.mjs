@@ -150,6 +150,17 @@ function publicAveSettings(ave) {
   };
 }
 
+function publicCreatorHistory(value) {
+  const raw = value && typeof value === 'object' ? value : {};
+  const maxLaunch = Number(raw.maxLaunchCount ?? raw.minLaunchCount);
+  const minSuccess = Number(raw.minSuccessRate ?? raw.maxSuccessRate);
+  return {
+    enabled: raw.enabled === true,
+    maxLaunchCount: Number.isInteger(maxLaunch) && maxLaunch >= 1 && maxLaunch <= 100000 ? maxLaunch : null,
+    minSuccessRate: Number.isFinite(minSuccess) && minSuccess >= 0 && minSuccess <= 1 ? minSuccess : null
+  };
+}
+
 export function voiceSnapshot(state, enabledChains) {
   const scopes = { ...state.chainStates, [state.activeChain]: state };
   return {
@@ -510,6 +521,7 @@ export function toPublicStatus(source = {}) {
       : [],
     chartRiskExclusion: source.chartRiskExclusion === true,
     throughputEnabled: source.throughputEnabled === true,
+    creatorHistory: publicCreatorHistory(source.creatorHistory),
     candidates: Array.isArray(source.candidates) ? source.candidates.slice(0, 100)
       .map(row => publicCandidate(source.chartRiskExclusion === true
         ? applyRiskExclusion(row, source.riskExclusions || {}, activeChain) : row)) : [],
@@ -814,14 +826,15 @@ export function createServer({ state, settings, controls, switchChain, saveGmgnK
         }
         if (url.pathname === '/api/preferences') {
           const keys = Object.keys(body);
-          if (keys.length !== 1 || typeof body[keys[0]] !== 'boolean') {
-            return sendJson(res, 400, { error: 'invalid_settings' }, csp);
-          }
-          if (keys[0] === 'chartRiskExclusion') {
+          if (keys.length !== 1) return sendJson(res, 400, { error: 'invalid_settings' }, csp);
+          if (keys[0] === 'chartRiskExclusion' && typeof body.chartRiskExclusion === 'boolean') {
             return sendJson(res, 200, controls.setChartRiskExclusion(body.chartRiskExclusion), csp);
           }
-          if (keys[0] === 'throughputEnabled') {
+          if (keys[0] === 'throughputEnabled' && typeof body.throughputEnabled === 'boolean') {
             return sendJson(res, 200, controls.setThroughputEnabled(body.throughputEnabled), csp);
+          }
+          if (keys[0] === 'creatorHistory') {
+            return sendJson(res, 200, controls.setCreatorHistory(body.creatorHistory), csp);
           }
           return sendJson(res, 400, { error: 'invalid_settings' }, csp);
         }
@@ -936,9 +949,11 @@ export function createServer({ state, settings, controls, switchChain, saveGmgnK
           policy: { ...state.value.policy, chain }, scanInProgress: false,
           chartRiskExclusion: controls?.value.chartRiskExclusion === true,
           throughputEnabled: controls?.value.throughputEnabled === true,
+          creatorHistory: controls?.value.creatorHistory,
           riskExclusions: state.value.riskExclusions }
         : { ...state.value, chartRiskExclusion: controls?.value.chartRiskExclusion === true,
-          throughputEnabled: controls?.value.throughputEnabled === true };
+          throughputEnabled: controls?.value.throughputEnabled === true,
+          creatorHistory: controls?.value.creatorHistory };
       const annotations = Object.fromEntries(Object.entries(controls?.value.annotations || {}).slice(0, 500).map(([key, value]) => [key, {
         chain: text(value.chain, 32), address: text(value.address, 128), favorite: value.favorite === true,
         note: publicMessage(value.note, '[redacted]', 500), updatedAt: finite(value.updatedAt)
@@ -963,6 +978,7 @@ export function createServer({ state, settings, controls, switchChain, saveGmgnK
             ...scope, activeChain: id,
             chartRiskExclusion: controls?.value.chartRiskExclusion === true,
             throughputEnabled: controls?.value.throughputEnabled === true,
+            creatorHistory: controls?.value.creatorHistory,
             riskExclusions: state.value.riskExclusions
           }),
           outcomes: (scope.outcomes || []).slice(0, 1000).map(row => ({
