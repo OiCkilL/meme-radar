@@ -20,3 +20,11 @@ logs/**
 *.pem
 *.p12
 npm-debug.log*
+
+# Agent / session artifacts
+.maestroignore
+.workflow/
+artifacts/
+docs/project-handoff/
+docs/superpowers/
+docs/upstream/
